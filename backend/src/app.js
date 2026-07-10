@@ -1,0 +1,58 @@
+import express from 'express';
+import cors from 'cors';
+import morgan from 'morgan';
+import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import authRoutes from './routes/auth.js';
+import complaintRoutes from './routes/complaints.js';
+import adminRoutes from './routes/admin.js';
+
+dotenv.config();
+
+const app = express();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
+
+app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
+app.use('/uploads', express.static('uploads'));
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    name: 'Smart Citizen Feedback and Complaint Management System',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/complaints', complaintRoutes);
+app.use('/api/admin', adminRoutes);
+
+if (process.env.SERVE_FRONTEND !== 'false' && fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) return next();
+    res.sendFile(path.join(frontendDistPath, 'index.html'), (error) => {
+      if (error) next(error);
+    });
+  });
+}
+
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
+});
+
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(err.status || 500).json({
+    message: err.message || 'Unexpected server error'
+  });
+});
+
+export default app;

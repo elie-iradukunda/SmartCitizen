@@ -1,0 +1,100 @@
+import { AuditLog, Complaint, Office, User } from '../models/index.js';
+import { publicUser, serializeAuditLog } from './serializers.js';
+
+const allowedRoles = ['citizen', 'staff', 'admin'];
+
+export const adminService = {
+  async users() {
+    const users = await User.findAll({
+      where: { role: allowedRoles },
+      include: [{ model: Office, as: 'office' }],
+      order: [['createdAt', 'DESC']]
+    });
+    return users.map(publicUser);
+  },
+
+  async createUser(payload) {
+    if (!payload.fullName || !payload.email || !payload.password) {
+      const error = new Error('fullName, email and password are required');
+      error.status = 422;
+      throw error;
+    }
+    if (payload.role && !allowedRoles.includes(payload.role)) {
+      const error = new Error('Only Citizen, Administrative Staff, and Admin roles are enabled.');
+      error.status = 422;
+      throw error;
+    }
+    const existing = await User.findOne({ where: { email: payload.email } });
+    if (existing) {
+      const error = new Error('A user with this email already exists');
+      error.status = 409;
+      throw error;
+    }
+    const user = await User.create({
+      fullName: payload.fullName,
+      email: payload.email,
+      password: payload.password,
+      phone: payload.phone || '',
+      role: payload.role || 'citizen',
+      gender: payload.gender || '',
+      province: payload.province || '',
+      district: payload.district || '',
+      sector: payload.sector || '',
+      officeId: payload.officeId || null,
+      status: payload.status || 'active'
+    });
+    return publicUser(user);
+  },
+
+  async updateUser(id, payload) {
+    const user = await User.findByPk(id);
+    if (!user) {
+      const error = new Error('User not found');
+      error.status = 404;
+      throw error;
+    }
+    const updates = { ...payload };
+    if (updates.role && !allowedRoles.includes(updates.role)) {
+      const error = new Error('Only Citizen, Administrative Staff, and Admin roles are enabled.');
+      error.status = 422;
+      throw error;
+    }
+    await user.update(updates);
+    return publicUser(user);
+  },
+
+  async deleteUser(id, requesterId) {
+    const user = await User.findByPk(id);
+    if (!user) {
+      const error = new Error('User not found');
+      error.status = 404;
+      throw error;
+    }
+    if (String(user.id) === String(requesterId)) {
+      const error = new Error('You cannot delete your own account while logged in.');
+      error.status = 422;
+      throw error;
+    }
+    if (user.role === 'admin') {
+      const otherAdmins = await User.count({ where: { role: 'admin' } });
+      if (otherAdmins <= 1) {
+        const error = new Error('At least one Admin account must remain.');
+        error.status = 422;
+        throw error;
+      }
+    }
+    const linkedComplaints = await Complaint.count({ where: { citizenId: user.id } });
+    if (linkedComplaints > 0) {
+      const error = new Error('This user has submitted complaints and cannot be deleted. Suspend the account instead.');
+      error.status = 422;
+      throw error;
+    }
+    await user.destroy();
+    return { deleted: true };
+  },
+
+  async auditLogs() {
+    const logs = await AuditLog.findAll({ order: [['createdAt', 'DESC']] });
+    return logs.map(serializeAuditLog);
+  }
+};

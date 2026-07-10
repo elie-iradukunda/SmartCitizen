@@ -1,0 +1,26 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Local runtime and test artifacts
+*.log
+*.out
+*.err
+test-results/
+test-screenshots/
+.chrome-live-test-profile/
+.claude/
+.railway/
+
+# Generated book/doc backups are not needed for app hosting
+Book/
+Backup book/
+
+# Uploaded files should stay local
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+npm-debug.log*
