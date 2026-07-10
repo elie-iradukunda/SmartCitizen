@@ -568,7 +568,8 @@ export const complaintService = {
   },
 
   async markNotificationRead(id, actor) {
-    const row = await ComplaintNotification.findByPk(id);
+    const notificationId = String(id).match(/\d+$/)?.[0];
+    const row = notificationId ? await ComplaintNotification.findByPk(notificationId) : null;
     if (!row) {
       const error = new Error('Notification not found');
       error.status = 404;
