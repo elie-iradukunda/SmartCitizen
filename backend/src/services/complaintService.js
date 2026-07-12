@@ -123,7 +123,12 @@ const publicOffice = (record) => {
 const officeCodeFrom = (name) => String(name || 'office')
   .toLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
-  .replace(/(^-|-$)/g, '');
+  .replace(/(^-|-$)/g, '') || 'office';
+
+const categoryCodeFrom = (name) => String(name || 'complaint-category')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/(^-|-$)/g, '') || 'complaint-category';
 
 const uniqueOfficeCode = async (name) => {
   const base = officeCodeFrom(name);
@@ -322,7 +327,29 @@ export const complaintService = {
       throw error;
     }
 
-    const office = await Office.create({
+    const code = payload.code || officeCodeFrom(payload.name);
+    let office = await Office.findOne({
+      where: {
+        [Op.or]: [
+          { name: payload.name },
+          { code }
+        ]
+      }
+    });
+
+    if (office) {
+      await office.update({
+        name: payload.name,
+        contactPerson: payload.contactPerson || office.contactPerson || '',
+        phone: payload.phone || office.phone || '',
+        email: payload.email || office.email || '',
+        active: payload.active === undefined ? true : Boolean(payload.active)
+      });
+      await logAction(actor?.fullName || 'Administrator', `Updated responsible office ${office.name}`, { entity: 'office', entityId: office.id });
+      return publicOffice(office);
+    }
+
+    office = await Office.create({
       code: payload.code || await uniqueOfficeCode(payload.name),
       name: payload.name,
       contactPerson: payload.contactPerson || '',
@@ -382,8 +409,30 @@ export const complaintService = {
       error.status = 422;
       throw error;
     }
-    const code = payload.code || payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const category = await ComplaintCategory.create({
+
+    const code = payload.code || categoryCodeFrom(payload.name);
+    let category = await ComplaintCategory.findOne({
+      where: {
+        [Op.or]: [
+          { name: payload.name },
+          { code }
+        ]
+      }
+    });
+
+    if (category) {
+      await category.update({
+        name: payload.name,
+        description: payload.description || category.description || '',
+        defaultPriority: payload.defaultPriority || category.defaultPriority || 'Medium',
+        slaDays: payload.slaDays || category.slaDays || 3,
+        active: true
+      });
+      await logAction(payload.actor || 'Admin', `Updated complaint category ${category.name}`, { entity: 'complaint_category', entityId: category.id });
+      return publicCategory(category);
+    }
+
+    category = await ComplaintCategory.create({
       code,
       name: payload.name,
       description: payload.description || '',
@@ -454,7 +503,32 @@ export const complaintService = {
     }
 
     const location = payload.location || 'Kacyiru';
-    const rule = await RoutingRule.create({
+    let rule = await RoutingRule.findOne({
+      where: {
+        categoryId: category.id,
+        active: true,
+        [Op.or]: [
+          { location },
+          { location: { [Op.ne]: null } }
+        ]
+      },
+      order: [['id', 'ASC']]
+    });
+
+    if (rule) {
+      await rule.update({
+        officeId: office.id,
+        location,
+        priority: payload.priority || category.defaultPriority || rule.priority || 'Medium',
+        slaDays: payload.slaDays || category.slaDays || rule.slaDays || 3,
+        active: payload.active === undefined ? true : Boolean(payload.active)
+      });
+      await logAction(actor?.fullName || 'Administrator', `Updated routing rule ${rule.code}`, { entity: 'routing_rule', entityId: rule.id });
+      const meta = await this.meta();
+      return { rule: meta.routingRules.find((item) => item.id === rule.id), routingRules: meta.routingRules };
+    }
+
+    rule = await RoutingRule.create({
       code: payload.code || await uniqueRouteCode(category, location),
       categoryId: category.id,
       officeId: office.id,

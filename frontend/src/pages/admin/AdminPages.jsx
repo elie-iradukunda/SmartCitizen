@@ -131,17 +131,23 @@ export const AdminSetup = () => {
   const staffForOffice = (officeId) => users.filter((user) => user.role === 'staff' && Number(user.officeId) === Number(officeId));
   const rulesForOffice = (officeId) => meta.routingRules.filter((rule) => Number(rule.officeId) === Number(officeId));
   const ruleForCategory = (categoryId) => meta.routingRules.find((rule) => Number(rule.categoryId) === Number(categoryId));
+  const upsertById = (items, item) => {
+    const exists = items.some((current) => Number(current.id) === Number(item.id));
+    return exists
+      ? items.map((current) => (Number(current.id) === Number(item.id) ? item : current))
+      : [...items, item];
+  };
 
   const createOffice = async (event) => {
     event.preventDefault();
     setBusy('office');
     try {
       const office = await endpoints.createOffice(officeForm);
-      setMeta((current) => ({ ...current, offices: [...current.offices, office] }));
+      setMeta((current) => ({ ...current, offices: upsertById(current.offices, office) }));
       setCategoryForm((current) => ({ ...current, officeId: current.officeId || office.id }));
       setStaffForm((current) => ({ ...current, officeId: current.officeId || office.id }));
       setOfficeForm(emptyOffice);
-      toast.success(`${office.name} department was added.`);
+      toast.success(`${office.name} department was saved.`);
     } catch (err) {
       toast.error(errorMessage(err, 'Could not create office'));
     } finally {
@@ -172,7 +178,7 @@ export const AdminSetup = () => {
       });
       setMeta((current) => ({
         ...current,
-        categories: [...current.categories, category],
+        categories: upsertById(current.categories, category),
         routingRules: result.routingRules
       }));
       toast.success(`${category.name} now routes to ${officeName(categoryForm.officeId)}.`);
