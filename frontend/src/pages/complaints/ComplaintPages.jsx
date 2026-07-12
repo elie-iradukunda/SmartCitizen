@@ -42,6 +42,7 @@ const supportedAudioMimeType = () => [
 export const SubmitComplaint = () => {
   const { user } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     ...defaultComplaint,
     citizenPhone: user?.phone || '',
@@ -50,7 +51,6 @@ export const SubmitComplaint = () => {
   });
   const [file, setFile] = useState(null);
   const [meta, setMeta] = useState(null);
-  const [created, setCreated] = useState(null);
   const [saving, setSaving] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceNote, setVoiceNote] = useState(null);
@@ -179,7 +179,6 @@ export const SubmitComplaint = () => {
       } else {
         complaint = await endpoints.createComplaint(payload);
       }
-      setCreated(complaint);
       setForm({
         ...defaultComplaint,
         citizenPhone: user?.phone || '',
@@ -189,6 +188,7 @@ export const SubmitComplaint = () => {
       setFile(null);
       removeVoiceNote();
       toast.success(`Complaint submitted. Tracking number ${complaint.trackingNumber}.`);
+      navigate(`/app/complaints/${complaint.trackingNumber}`);
     } catch (err) {
       toast.error(errorMessage(err, 'Could not submit complaint'));
     } finally {
@@ -199,21 +199,6 @@ export const SubmitComplaint = () => {
   return (
     <div>
       <PageHeader title="Submit Complaint" subtitle="Record a complaint or citizen feedback and receive a tracking number immediately." />
-      {created && (
-        <section className="panel mb-6 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-slate-500">Tracking number</p>
-              <h2 className="mt-1 text-2xl font-bold text-slate-950">{created.trackingNumber}</h2>
-              <p className="mt-2 text-sm text-slate-600">Automatically routed to {created.assignedOffice} and assigned to {created.assignedTo}.</p>
-            </div>
-            <Link to={`/app/complaints/${created.trackingNumber}`} className="btn-primary">
-              <FileText size={16} />
-              View Case
-            </Link>
-          </div>
-        </section>
-      )}
       <form onSubmit={submit} className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <section className="panel p-6">
           <div className="grid gap-4">
