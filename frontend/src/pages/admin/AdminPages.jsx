@@ -555,6 +555,14 @@ const AdminListPage = ({ title, subtitle, icon: Icon, children, actions = null }
   </div>
 );
 
+const SetupStep = ({ number, title, text }) => (
+  <article className="rounded-lg border border-violet-100 bg-violet-50 p-4">
+    <span className="grid h-8 w-8 place-items-center rounded-full bg-violet-700 text-sm font-bold text-white">{number}</span>
+    <h2 className="mt-3 font-bold text-slate-950">{title}</h2>
+    <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+  </article>
+);
+
 const Table = ({ headers, children }) => (
   <section className="panel overflow-x-auto">
     <table className="w-full min-w-[900px] text-left text-sm">
