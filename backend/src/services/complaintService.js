@@ -70,6 +70,9 @@ const publicComplaint = (record) => {
     evidenceType: item.evidenceType,
     attachmentName: item.attachmentName,
     attachmentPath: item.attachmentPath,
+    voiceNoteName: item.voiceNoteName,
+    voiceNotePath: item.voiceNotePath,
+    voiceNoteType: item.voiceNoteType,
     followUpRequired: item.status === 'Escalated' || overdue || lowRating,
     dueDate: item.dueDate,
     resolvedAt: item.resolvedAt,
@@ -576,12 +579,19 @@ export const complaintService = {
     return publicComplaint(complaint);
   },
 
-  async create(payload, actor, file) {
+  async create(payload, actor, files = {}) {
+    const attachmentFile = files?.attachment || (files?.mimetype ? files : null);
+    const voiceNoteFile = files?.voiceNote || null;
     const category = await findCategory(payload.categoryId || payload.type || payload.category);
     const location = payload.location || [payload.sector, payload.district, payload.province].filter(Boolean).join(', ') || 'Kacyiru Sector, Gasabo District';
     const rule = await findRoutingRule(category.id, location);
     const office = rule.office || await Office.findByPk(rule.officeId);
     const trackingNumber = await nextTrackingNumber();
+    const fallbackDescription = voiceNoteFile
+      ? 'Voice complaint recorded by citizen.'
+      : attachmentFile
+        ? 'Evidence submitted by citizen.'
+        : '';
 
     const complaint = await Complaint.create({
       trackingNumber,
@@ -590,7 +600,7 @@ export const complaintService = {
       officeId: office.id,
       citizenName: payload.citizenName || actor.fullName,
       citizenPhone: payload.citizenPhone || payload.phone || actor.phone,
-      description: payload.description,
+      description: payload.description?.trim() || fallbackDescription,
       location,
       cell: payload.cell || '',
       village: payload.village || '',
@@ -599,9 +609,12 @@ export const complaintService = {
       assignedTo: office.contactPerson,
       channel: payload.channel || 'Web Portal',
       submissionMode: payload.submissionMode || payload.channel || 'Typed form',
-      evidenceType: evidenceTypeFromFile(file),
-      attachmentName: file?.originalname || payload.attachmentName || '',
-      attachmentPath: file ? `/uploads/${file.filename}` : '',
+      evidenceType: evidenceTypeFromFile(attachmentFile),
+      attachmentName: attachmentFile?.originalname || payload.attachmentName || '',
+      attachmentPath: attachmentFile ? `/uploads/${attachmentFile.filename}` : '',
+      voiceNoteName: voiceNoteFile?.originalname || '',
+      voiceNotePath: voiceNoteFile ? `/uploads/${voiceNoteFile.filename}` : '',
+      voiceNoteType: evidenceTypeFromFile(voiceNoteFile),
       dueDate: dueDateFromDays(rule.slaDays || category.slaDays)
     });
 

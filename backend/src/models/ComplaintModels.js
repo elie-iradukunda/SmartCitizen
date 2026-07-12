@@ -55,6 +55,9 @@ export const defineComplaint = (sequelize) => sequelize.define('Complaint', {
   evidenceType: DataTypes.STRING(40),
   attachmentName: DataTypes.STRING(220),
   attachmentPath: DataTypes.STRING(255),
+  voiceNoteName: DataTypes.STRING(220),
+  voiceNotePath: DataTypes.STRING(255),
+  voiceNoteType: DataTypes.STRING(40),
   dueDate: DataTypes.DATEONLY,
   resolvedAt: DataTypes.DATE,
   closedAt: DataTypes.DATE

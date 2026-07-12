@@ -9,8 +9,17 @@ export const complaintController = {
   find: asyncHandler(async (req, res) => res.json(await complaintService.find(req.params.trackingNumber, req.user))),
 
   create: asyncHandler(async (req, res) => {
-    validateRequired(req.body, ['type', 'description']);
-    res.status(201).json(await complaintService.create(req.body, req.user, req.file));
+    const files = {
+      attachment: req.file || req.files?.attachment?.[0] || null,
+      voiceNote: req.files?.voiceNote?.[0] || null
+    };
+    validateRequired(req.body, ['type']);
+    if (!req.body.description?.trim() && !files.voiceNote && !files.attachment) {
+      const error = new Error('Description, voice recording, or evidence upload is required');
+      error.status = 422;
+      throw error;
+    }
+    res.status(201).json(await complaintService.create(req.body, req.user, files));
   }),
 
   update: asyncHandler(async (req, res) => {

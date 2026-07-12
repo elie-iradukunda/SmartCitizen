@@ -15,8 +15,7 @@ const defaultComplaint = {
   type: '',
   description: '',
   citizenPhone: '',
-  ...kacyiruDefaults,
-  voiceLanguage: 'rw-RW'
+  ...kacyiruDefaults
 };
 
 const formatDate = (value) => (value ? new Date(value).toLocaleString() : 'Not set');
@@ -27,6 +26,18 @@ const staffStatusOptions = ['Assigned', 'In Review', 'Waiting for Citizen', 'Res
 const priorityOptions = ['Low', 'Medium', 'High', 'Critical'];
 const isTerminal = (complaint) => terminalStatuses.includes(complaint.status);
 const isOverdue = (complaint) => !isTerminal(complaint) && complaint.dueDate && complaint.dueDate < todayIso();
+const audioExtensionFromMime = (mime = '') => {
+  if (mime.includes('mp4')) return 'm4a';
+  if (mime.includes('ogg')) return 'ogg';
+  if (mime.includes('wav')) return 'wav';
+  return 'webm';
+};
+const supportedAudioMimeType = () => [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/mp4',
+  'audio/ogg;codecs=opus'
+].find((type) => window.MediaRecorder?.isTypeSupported?.(type));
 
 export const SubmitComplaint = () => {
   const { user } = useAuth();
@@ -41,13 +52,21 @@ export const SubmitComplaint = () => {
   const [meta, setMeta] = useState(null);
   const [created, setCreated] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [usedVoice, setUsedVoice] = useState(false);
-  const recognitionRef = useRef(null);
+  const [recording, setRecording] = useState(false);
+  const [voiceNote, setVoiceNote] = useState(null);
+  const [voiceNoteUrl, setVoiceNoteUrl] = useState('');
+  const mediaRecorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const voiceNoteUrlRef = useRef('');
 
   useEffect(() => { endpoints.complaintMeta().then(setMeta); }, []);
 
-  useEffect(() => () => recognitionRef.current?.stop(), []);
+  useEffect(() => () => {
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (voiceNoteUrlRef.current) URL.revokeObjectURL(voiceNoteUrlRef.current);
+  }, []);
 
   const update = (field, value) => setForm((current) => {
     if (field === 'cell') {
@@ -56,59 +75,106 @@ export const SubmitComplaint = () => {
     return { ...current, [field]: value };
   });
 
-  const toggleVoiceInput = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      toast.error('Voice input is not supported in this browser.');
+  const removeVoiceNote = () => {
+    if (voiceNoteUrlRef.current) URL.revokeObjectURL(voiceNoteUrlRef.current);
+    voiceNoteUrlRef.current = '';
+    setVoiceNote(null);
+    setVoiceNoteUrl('');
+  };
+
+  const saveVoicePreview = (blob) => {
+    removeVoiceNote();
+    const url = URL.createObjectURL(blob);
+    voiceNoteUrlRef.current = url;
+    setVoiceNote(blob);
+    setVoiceNoteUrl(url);
+  };
+
+  const startVoiceRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      toast.error('Voice recording is not supported in this browser.');
       return;
     }
-
-    if (listening) {
-      recognitionRef.current?.stop();
-      setListening(false);
-      return;
+    try {
+      removeVoiceNote();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = supportedAudioMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      audioChunksRef.current = [];
+      recordingStreamRef.current = stream;
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || mimeType || 'audio/webm' });
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        setRecording(false);
+        if (blob.size > 0) {
+          saveVoicePreview(blob);
+          toast.success('Voice recording saved. You can play it before submitting.');
+        }
+      };
+      recorder.onerror = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        setRecording(false);
+        toast.error('Voice recording stopped. Please try again.');
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch (err) {
+      setRecording(false);
+      toast.error('Microphone permission was not granted.');
     }
+  };
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = form.voiceLanguage;
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .slice(event.resultIndex)
-        .map((result) => result[0].transcript)
-        .join(' ')
-        .trim();
-      if (!transcript) return;
-      setUsedVoice(true);
-      setForm((current) => ({
-        ...current,
-        description: [current.description, transcript].filter(Boolean).join(' ').trim()
-      }));
-    };
-    recognition.onerror = () => {
-      setListening(false);
-      toast.error('Voice input stopped. Please try again or type the complaint.');
-    };
-    recognition.onend = () => setListening(false);
-    recognitionRef.current = recognition;
-    recognition.start();
-    setListening(true);
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    } else {
+      setRecording(false);
+    }
   };
 
   const submit = async (event) => {
     event.preventDefault();
+    if (recording) {
+      toast.error('Stop the voice recording before submitting.');
+      return;
+    }
+    if (!form.description.trim() && !voiceNote && !file) {
+      toast.error('Type a description, record a voice complaint, or upload evidence.');
+      return;
+    }
     setSaving(true);
     try {
       const location = [form.sector, form.district, form.province].filter(Boolean).join(', ');
-      const submissionMode = usedVoice ? 'Voice Assisted' : file?.type?.startsWith('video/') ? 'Video Evidence' : 'Typed form';
-      const channel = usedVoice ? 'Voice Assisted' : 'Web Portal';
+      const hasVideoEvidence = file?.type?.startsWith('video/');
+      const hasAudioEvidence = file?.type?.startsWith('audio/');
+      const submissionMode = voiceNote && hasVideoEvidence
+        ? 'Voice Recording + Video Evidence'
+        : voiceNote
+          ? 'Voice Recording'
+          : hasVideoEvidence
+            ? 'Video Evidence'
+            : hasAudioEvidence
+              ? 'Audio Evidence'
+              : file
+                ? 'Evidence Upload'
+                : 'Typed form';
+      const channel = voiceNote ? 'Voice Recording' : 'Web Portal';
       const payload = { ...form, location, submissionMode, channel };
       let complaint;
-      if (file) {
+      if (file || voiceNote) {
         const formData = new FormData();
         Object.entries(payload).forEach(([key, value]) => formData.append(key, value));
-        formData.append('attachment', file);
+        if (file) formData.append('attachment', file);
+        if (voiceNote) {
+          const extension = audioExtensionFromMime(voiceNote.type);
+          formData.append('voiceNote', voiceNote, `citizen-voice-complaint.${extension}`);
+        }
         complaint = await endpoints.createComplaint(formData);
       } else {
         complaint = await endpoints.createComplaint(payload);
@@ -121,7 +187,7 @@ export const SubmitComplaint = () => {
         village: user?.village || defaultComplaint.village
       });
       setFile(null);
-      setUsedVoice(false);
+      removeVoiceNote();
       toast.success(`Complaint submitted. Tracking number ${complaint.trackingNumber}.`);
     } catch (err) {
       toast.error(errorMessage(err, 'Could not submit complaint'));
@@ -160,24 +226,36 @@ export const SubmitComplaint = () => {
             </label>
             <label>
               <span className="label">Description</span>
-              <textarea className="input min-h-36" value={form.description} onChange={(event) => update('description', event.target.value)} placeholder="Explain what happened, when it happened, and what help you expect." required />
+              <textarea className="input min-h-36" value={form.description} onChange={(event) => update('description', event.target.value)} placeholder="Explain what happened, when it happened, and what help you expect." required={!voiceNote && !file} />
             </label>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                <label className="sm:w-48">
-                  <span className="label">Voice Language</span>
-                  <select className="input" value={form.voiceLanguage} onChange={(event) => update('voiceLanguage', event.target.value)}>
-                    <option value="rw-RW">Kinyarwanda</option>
-                    <option value="en-US">English</option>
-                  </select>
-                </label>
-                <button type="button" className={listening ? 'btn-secondary text-red-700' : 'btn-secondary'} onClick={toggleVoiceInput}>
-                  {listening ? <Square size={16} /> : <Mic size={16} />}
-                  {listening ? 'Stop Speaking' : 'Speak Complaint'}
-                </button>
-                {usedVoice && <StatusBadge value="Voice Assisted" />}
+              <div className="rounded-md border border-dashed border-slate-300 bg-white p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-slate-900">Voice complaint recording</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">Record the citizen speaking. The audio file is saved with the case exactly as recorded.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className={recording ? 'btn-secondary text-red-700' : 'btn-secondary'} onClick={recording ? stopVoiceRecording : startVoiceRecording}>
+                      {recording ? <Square size={16} /> : <Mic size={16} />}
+                      {recording ? 'Stop Recording' : 'Record Voice Note'}
+                    </button>
+                    {voiceNote && !recording && (
+                      <button type="button" className="btn-secondary text-red-700" onClick={removeVoiceNote}>
+                        <Trash2 size={16} />
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {recording && <p className="mt-2 text-xs font-semibold text-red-600">Recording now. Speak clearly, then press Stop Recording.</p>}
+                {voiceNoteUrl && (
+                  <div className="mt-3">
+                    <audio className="w-full" controls src={voiceNoteUrl} />
+                    <p className="mt-1 text-xs text-slate-500">Play this audio to confirm it is clear before submitting.</p>
+                  </div>
+                )}
               </div>
-              <p className="mt-2 text-xs text-slate-500">Use speech to fill the description, then review the text before submitting.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <Field label="Province" value={form.province} readOnly />
@@ -200,25 +278,26 @@ export const SubmitComplaint = () => {
               <Field label="Phone" value={form.citizenPhone} onChange={(value) => update('citizenPhone', value)} />
             </div>
             <label>
-              <span className="label">Evidence Upload (image, PDF, or video)</span>
+              <span className="label">Evidence Upload (image, video, audio, or PDF)</span>
               <input
                 className="input"
                 type="file"
-                accept="image/*,video/*,.pdf"
+                accept="image/*,video/*,audio/*,.pdf"
                 onChange={(event) => setFile(event.target.files?.[0] || null)}
               />
               {file && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
                   <UploadCloud size={13} />
-                  {file.name} {file.type?.startsWith('video/') ? '(video evidence)' : ''}
+                  {file.name} {file.type?.startsWith('video/') ? '(video evidence)' : file.type?.startsWith('audio/') ? '(audio evidence)' : ''}
                 </p>
               )}
+              <p className="mt-1 text-xs text-slate-500">Upload a video, audio file, image, or PDF as evidence. This can be submitted together with the voice recording.</p>
             </label>
           </div>
           <div className="mt-6 flex justify-end">
-            <button className="btn-primary" disabled={saving}>
+            <button className="btn-primary" disabled={saving || recording}>
               <Send size={16} />
-              {saving ? 'Submitting...' : 'Submit Complaint'}
+              {recording ? 'Stop recording first' : saving ? 'Submitting...' : 'Submit Complaint'}
             </button>
           </div>
         </section>
@@ -320,6 +399,7 @@ export const ComplaintDetails = () => {
 
   if (!complaint) return <LoadingState />;
   const evidenceUrl = complaint.attachmentPath ? `${API_ORIGIN}${complaint.attachmentPath}` : '';
+  const voiceNoteUrl = complaint.voiceNotePath ? `${API_ORIGIN}${complaint.voiceNotePath}` : '';
 
   return (
     <div>
@@ -356,11 +436,24 @@ export const ComplaintDetails = () => {
           <Info label="Cell / Village" value={[complaint.cell, complaint.village].filter(Boolean).join(' / ') || 'Not provided'} />
           <Info label="Submitted" value={formatDate(complaint.createdAt)} />
           <Info label="Due Date" value={complaint.dueDate} />
+          {complaint.voiceNotePath && (
+            <div className="mt-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Citizen Voice Recording</p>
+              <audio className="mt-2 w-full" controls src={voiceNoteUrl} />
+              <a href={voiceNoteUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1 text-sm font-semibold text-brand-600 hover:underline">
+                <Mic size={14} />
+                {complaint.voiceNoteName || 'Open voice recording'}
+              </a>
+            </div>
+          )}
           {complaint.attachmentPath ? (
             <div className="mt-4">
               <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Evidence</p>
               {complaint.evidenceType === 'video' && (
                 <video className="mt-2 aspect-video w-full rounded-md border border-slate-200 bg-black" controls src={evidenceUrl} />
+              )}
+              {complaint.evidenceType === 'audio' && (
+                <audio className="mt-2 w-full" controls src={evidenceUrl} />
               )}
               {complaint.evidenceType === 'image' && (
                 <img className="mt-2 max-h-72 w-full rounded-md border border-slate-200 object-cover" src={evidenceUrl} alt={complaint.attachmentName || 'Complaint evidence'} />

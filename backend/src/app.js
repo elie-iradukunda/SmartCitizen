@@ -61,11 +61,12 @@ app.use((err, req, res, next) => {
   console.error(err);
   const uniqueError = err.name === 'SequelizeUniqueConstraintError';
   const validationError = err.name === 'SequelizeValidationError';
+  const uploadError = err.name === 'MulterError' || err.message?.startsWith('Only image, video, audio, or PDF');
   const message = uniqueError
     ? `${err.errors?.[0]?.path || 'Record'} already exists. Use a different value or update the existing record.`
     : err.message || 'Unexpected server error';
 
-  res.status(err.status || (uniqueError ? 409 : validationError ? 422 : 500)).json({ message });
+  res.status(err.status || (uniqueError ? 409 : validationError || uploadError ? 422 : 500)).json({ message });
 });
 
 export default app;

@@ -28,7 +28,10 @@ const ensureSchemaColumns = async () => {
     [User, 'address'],
     [User, 'preferredLanguage'],
     [Complaint, 'submissionMode'],
-    [Complaint, 'evidenceType']
+    [Complaint, 'evidenceType'],
+    [Complaint, 'voiceNoteName'],
+    [Complaint, 'voiceNotePath'],
+    [Complaint, 'voiceNoteType']
   ];
 
   for (const [model, attributeName] of additions) {

@@ -1,10 +1,50 @@
 import { Router } from 'express';
 import multer from 'multer';
+import path from 'path';
 import { complaintController } from '../controllers/complaintController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
-const upload = multer({ dest: 'uploads/', limits: { fileSize: 50 * 1024 * 1024 } });
+const extensionFromMime = (mime = '') => {
+  if (mime.includes('webm')) return '.webm';
+  if (mime.includes('ogg')) return '.ogg';
+  if (mime.includes('mp4')) return '.mp4';
+  if (mime.includes('quicktime')) return '.mov';
+  if (mime.includes('mpeg')) return '.mp3';
+  if (mime.includes('m4a')) return '.m4a';
+  if (mime.includes('wav')) return '.wav';
+  if (mime.includes('pdf')) return '.pdf';
+  if (mime.includes('png')) return '.png';
+  if (mime.includes('jpeg')) return '.jpg';
+  if (mime.includes('webp')) return '.webp';
+  if (mime.includes('gif')) return '.gif';
+  return '';
+};
+const allowedUpload = (file) => (
+  file.mimetype.startsWith('image/')
+  || file.mimetype.startsWith('video/')
+  || file.mimetype.startsWith('audio/')
+  || file.mimetype === 'application/pdf'
+);
+const storage = multer.diskStorage({
+  destination: 'uploads/',
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '') || extensionFromMime(file.mimetype);
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  }
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024, files: 2 },
+  fileFilter: (req, file, cb) => {
+    if (allowedUpload(file)) return cb(null, true);
+    return cb(new Error('Only image, video, audio, or PDF evidence files are allowed.'));
+  }
+});
+const complaintUploads = upload.fields([
+  { name: 'attachment', maxCount: 1 },
+  { name: 'voiceNote', maxCount: 1 }
+]);
 
 router.get('/public-summary', complaintController.publicSummary);
 
@@ -19,7 +59,7 @@ router.get('/notifications/unread-count', complaintController.unreadCount);
 router.get('/audit-logs', requireRole('admin'), complaintController.auditLogs);
 router.get('/', requireRole('staff', 'admin'), complaintController.list);
 router.get('/:trackingNumber', complaintController.find);
-router.post('/', requireRole('citizen'), upload.single('attachment'), complaintController.create);
+router.post('/', requireRole('citizen'), complaintUploads, complaintController.create);
 router.post('/offices', requireRole('admin'), complaintController.createOffice);
 router.patch('/offices/:id', requireRole('admin'), complaintController.updateOffice);
 router.delete('/offices/:id', requireRole('admin'), complaintController.deleteOffice);
