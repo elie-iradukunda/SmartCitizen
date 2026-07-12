@@ -3,6 +3,25 @@ import { publicUser, serializeAuditLog } from './serializers.js';
 
 const allowedRoles = ['citizen', 'staff', 'admin'];
 
+// Staff only ever see the cases of the office they belong to, so a staff account
+// without an office can open nothing. Citizens and admins are never office-bound.
+const resolveOfficeId = async (role, requestedOfficeId, currentOfficeId = null) => {
+  if (role !== 'staff') return null;
+  const officeId = requestedOfficeId === undefined ? currentOfficeId : requestedOfficeId;
+  if (!officeId) {
+    const error = new Error('An Administrative Staff account must be linked to a responsible office.');
+    error.status = 422;
+    throw error;
+  }
+  const office = await Office.findByPk(officeId);
+  if (!office || !office.active) {
+    const error = new Error('Responsible office not found');
+    error.status = 422;
+    throw error;
+  }
+  return office.id;
+};
+
 export const adminService = {
   async users() {
     const users = await User.findAll({
@@ -30,20 +49,21 @@ export const adminService = {
       error.status = 409;
       throw error;
     }
+    const role = payload.role || 'citizen';
     const user = await User.create({
       fullName: payload.fullName,
       email: payload.email,
       password: payload.password,
       phone: payload.phone || '',
-      role: payload.role || 'citizen',
+      role,
       gender: payload.gender || '',
       province: payload.province || '',
       district: payload.district || '',
       sector: payload.sector || '',
-      officeId: payload.officeId || null,
+      officeId: await resolveOfficeId(role, payload.officeId),
       status: payload.status || 'active'
     });
-    return publicUser(user);
+    return publicUser(await User.findByPk(user.id, { include: [{ model: Office, as: 'office' }] }));
   },
 
   async updateUser(id, payload) {
@@ -59,8 +79,10 @@ export const adminService = {
       error.status = 422;
       throw error;
     }
+    const role = updates.role || user.role;
+    updates.officeId = await resolveOfficeId(role, payload.officeId, user.officeId);
     await user.update(updates);
-    return publicUser(user);
+    return publicUser(await User.findByPk(user.id, { include: [{ model: Office, as: 'office' }] }));
   },
 
   async deleteUser(id, requesterId) {

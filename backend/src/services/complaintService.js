@@ -227,6 +227,16 @@ const assertVisibleToActor = (complaint, actor) => {
   }
 };
 
+// A citizen sees only their own notifications, a staff member only those raised on
+// cases held by their office, and an admin sees the whole system feed.
+const notificationScope = (actor) => (actor?.role === 'citizen' ? { userId: actor.id } : {});
+
+const notificationComplaintInclude = (actor) => {
+  const include = { model: Complaint, as: 'complaint' };
+  if (actor?.role !== 'staff') return include;
+  return { ...include, required: true, where: { officeId: actor.officeId ?? -1 } };
+};
+
 const statusCounts = async () => {
   const rows = await Complaint.findAll({ attributes: ['status'] });
   return Object.values(rows.reduce((acc, row) => {
@@ -280,6 +290,42 @@ export const complaintService = {
     });
     await logAction(payload.actor || 'Admin', `Created complaint category ${category.name}`, { entity: 'complaint_category', entityId: category.id });
     return publicCategory(category);
+  },
+
+  async updateCategory(id, payload, actor) {
+    const category = await ComplaintCategory.findByPk(id);
+    if (!category) {
+      const error = new Error('Complaint category not found');
+      error.status = 404;
+      throw error;
+    }
+    const updates = {};
+    ['name', 'description', 'defaultPriority', 'slaDays'].forEach((field) => {
+      if (payload[field] !== undefined) updates[field] = payload[field];
+    });
+    if (payload.active !== undefined) updates.active = Boolean(payload.active);
+    await category.update(updates);
+    await logAction(actor?.fullName || 'Administrator', `Updated complaint category ${category.name}`, { entity: 'complaint_category', entityId: category.id });
+    return publicCategory(category);
+  },
+
+  async deleteCategory(id, actor) {
+    const category = await ComplaintCategory.findByPk(id);
+    if (!category) {
+      const error = new Error('Complaint category not found');
+      error.status = 404;
+      throw error;
+    }
+    const linkedComplaints = await Complaint.count({ where: { categoryId: category.id } });
+    if (linkedComplaints > 0) {
+      const error = new Error('Complaints were already submitted under this category, so it cannot be deleted. Set it to inactive instead.');
+      error.status = 422;
+      throw error;
+    }
+    await RoutingRule.destroy({ where: { categoryId: category.id } });
+    await category.destroy();
+    await logAction(actor?.fullName || 'Administrator', `Deleted complaint category ${category.name}`, { entity: 'complaint_category', entityId: category.id });
+    return { deleted: true };
   },
 
   async createRoutingRule(payload, actor) {
@@ -486,6 +532,29 @@ export const complaintService = {
     return { rule: meta.routingRules.find((item) => item.id === rule.id), routingRules: meta.routingRules };
   },
 
+  async deleteRoutingRule(id, actor) {
+    const rule = await RoutingRule.findByPk(id);
+    if (!rule) {
+      const error = new Error('Routing rule not found');
+      error.status = 404;
+      throw error;
+    }
+    await rule.destroy();
+    await logAction(actor?.fullName || 'Administrator', `Deleted routing rule ${rule.code}`, { entity: 'routing_rule', entityId: rule.id });
+    const meta = await this.meta();
+    return { deleted: true, routingRules: meta.routingRules };
+  },
+
+  async remove(trackingNumber, actor) {
+    const complaint = await loadComplaint(trackingNumber);
+    await ComplaintNotification.destroy({ where: { complaintId: complaint.id } });
+    await ComplaintResponse.destroy({ where: { complaintId: complaint.id } });
+    await SatisfactionRating.destroy({ where: { complaintId: complaint.id } });
+    await complaint.destroy();
+    await logAction(actor?.fullName || 'Administrator', `Deleted complaint ${trackingNumber}`, { entity: 'complaint', entityId: trackingNumber });
+    return { deleted: true, trackingNumber };
+  },
+
   async publicSummary() {
     const complaints = await Complaint.findAll({ attributes: ['status', 'dueDate'] });
     const active = complaints.filter((complaint) => !['Closed', 'Resolved'].includes(complaint.status));
@@ -549,10 +618,9 @@ export const complaintService = {
   },
 
   async notifications(actor) {
-    const where = actor?.role === 'citizen' ? { userId: actor.id } : {};
     const rows = await ComplaintNotification.findAll({
-      where,
-      include: [{ model: Complaint, as: 'complaint' }],
+      where: notificationScope(actor),
+      include: [notificationComplaintInclude(actor)],
       order: [['createdAt', 'DESC']],
       limit: 50
     });
@@ -569,13 +637,13 @@ export const complaintService = {
 
   async markNotificationRead(id, actor) {
     const notificationId = String(id).match(/\d+$/)?.[0];
-    const row = notificationId ? await ComplaintNotification.findByPk(notificationId) : null;
+    const row = notificationId
+      ? await ComplaintNotification.findOne({
+        where: { id: notificationId, ...notificationScope(actor) },
+        include: [notificationComplaintInclude(actor)]
+      })
+      : null;
     if (!row) {
-      const error = new Error('Notification not found');
-      error.status = 404;
-      throw error;
-    }
-    if (actor?.role === 'citizen' && row.userId !== actor.id) {
       const error = new Error('Notification not found');
       error.status = 404;
       throw error;
@@ -585,8 +653,10 @@ export const complaintService = {
   },
 
   async unreadNotificationCount(actor) {
-    const where = actor?.role === 'citizen' ? { userId: actor.id, read: false } : { read: false };
-    const count = await ComplaintNotification.count({ where });
+    const count = await ComplaintNotification.count({
+      where: { read: false, ...notificationScope(actor) },
+      include: [notificationComplaintInclude(actor)]
+    });
     return { count };
   },
 

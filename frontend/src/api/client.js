@@ -53,6 +53,7 @@ export const endpoints = {
     return unwrap(api.post('/complaints', payload, isFormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : undefined));
   },
   updateComplaintStatus: (trackingNumber, payload) => unwrap(api.patch(`/complaints/${trackingNumber}/status`, payload)),
+  deleteComplaint: (trackingNumber) => unwrap(api.delete(`/complaints/${trackingNumber}`)),
   escalateComplaint: (trackingNumber, payload) => unwrap(api.post(`/complaints/${trackingNumber}/escalate`, payload)),
   rateComplaint: (trackingNumber, payload) => unwrap(api.post(`/complaints/${trackingNumber}/rate`, payload)),
   complaintReports: () => unwrap(api.get('/complaints/reports')),
@@ -60,7 +61,10 @@ export const endpoints = {
   complaintAuditLogs: () => unwrap(api.get('/complaints/audit-logs')),
   createRoutingRule: (payload) => unwrap(api.post('/complaints/routing-rules', payload)),
   updateRoutingRule: (id, payload) => unwrap(api.patch(`/complaints/routing-rules/${id}`, payload)),
+  deleteRoutingRule: (id) => unwrap(api.delete(`/complaints/routing-rules/${id}`)),
   createComplaintCategory: (payload) => unwrap(api.post('/complaints/categories', payload)),
+  updateComplaintCategory: (id, payload) => unwrap(api.patch(`/complaints/categories/${id}`, payload)),
+  deleteComplaintCategory: (id) => unwrap(api.delete(`/complaints/categories/${id}`)),
   readNotification: (id) => unwrap(api.patch(`/complaints/notifications/${id}/read`)),
   unreadNotificationCount: () => unwrap(api.get('/complaints/notifications/unread-count')),
 

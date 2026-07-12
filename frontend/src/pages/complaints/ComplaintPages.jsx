@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, FileText, ListChecks, Paperclip, PlusCircle, Send, Star } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, ListChecks, Paperclip, PlusCircle, Send, Star, Trash2 } from 'lucide-react';
 import { API_ORIGIN, endpoints } from '../../api/client.js';
 import { CategoryDonut } from '../../components/Charts.jsx';
 import { LoadingState } from '../../components/LoadingState.jsx';
@@ -489,12 +489,29 @@ export const AssignedCases = () => {
 };
 
 export const AdminComplaints = () => {
+  const toast = useToast();
   const [complaints, setComplaints] = useState([]);
+  const [busyId, setBusyId] = useState(null);
   useEffect(() => { endpoints.complaints().then(setComplaints); }, []);
+
+  const removeComplaint = async (complaint) => {
+    if (!window.confirm(`Delete ${complaint.trackingNumber}? Its responses, notifications, and rating are removed with it.`)) return;
+    setBusyId(complaint.trackingNumber);
+    try {
+      await endpoints.deleteComplaint(complaint.trackingNumber);
+      setComplaints((items) => items.filter((item) => item.trackingNumber !== complaint.trackingNumber));
+      toast.success(`${complaint.trackingNumber} was deleted.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete complaint'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div>
       <PageHeader title="Complaint Register" subtitle="Central case register showing tracking numbers, routing, offices, priorities, and status." />
-      <ComplaintTable complaints={complaints} base="/admin/complaints" />
+      <ComplaintTable complaints={complaints} base="/admin/complaints" onDelete={removeComplaint} busyId={busyId} />
     </div>
   );
 };
@@ -601,6 +618,22 @@ export const AdminRoutingRules = () => {
     }
   };
 
+  const removeRule = async (rule) => {
+    const complaintType = meta.categories.find((item) => item.id === rule.categoryId);
+    if (!window.confirm(`Delete the routing rule for ${complaintType?.name} in ${rule.location}? New complaints of this type will have no office to route to unless another rule covers them.`)) return;
+    setSavingId(rule.id);
+    try {
+      const result = await endpoints.deleteRoutingRule(rule.id);
+      setMeta((current) => ({ ...current, routingRules: result.routingRules }));
+      clear(rule.id);
+      toast.success('Routing rule deleted.');
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete routing rule'));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
   if (!meta) return <LoadingState />;
 
   return (
@@ -634,8 +667,8 @@ export const AdminRoutingRules = () => {
           <button className="btn-primary w-full" disabled={creatingRule}><PlusCircle size={16} />{creatingRule ? 'Adding...' : 'Add Rule'}</button>
         </div>
       </form>
-      <section className="panel overflow-hidden">
-        <table className="w-full text-left text-sm">
+      <section className="panel overflow-x-auto">
+        <table className="w-full min-w-[900px] text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr><th className="px-4 py-3">Complaint Type</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">SLA</th><th className="px-4 py-3" /></tr>
           </thead>
@@ -660,11 +693,21 @@ export const AdminRoutingRules = () => {
                     <input className="input w-24" type="number" min="1" value={ruleValue(rule, 'slaDays')} onChange={(event) => setField(rule.id, 'slaDays', Number(event.target.value))} />
                   </td>
                   <td className="px-4 py-3">
-                    {isDirty(rule) && (
-                      <button className="btn-primary" disabled={savingId === rule.id} onClick={() => saveRule(rule)}>
-                        {savingId === rule.id ? 'Saving...' : 'Save'}
+                    <div className="flex items-center justify-end gap-2">
+                      {isDirty(rule) && (
+                        <button className="btn-primary" disabled={savingId === rule.id} onClick={() => saveRule(rule)}>
+                          {savingId === rule.id ? 'Saving...' : 'Save'}
+                        </button>
+                      )}
+                      <button
+                        className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
+                        disabled={savingId === rule.id}
+                        onClick={() => removeRule(rule)}
+                        aria-label={`Delete routing rule ${rule.id}`}
+                      >
+                        <Trash2 size={15} />
                       </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               );
@@ -682,8 +725,54 @@ export const ComplaintTypeManagement = () => {
   const [savingId, setSavingId] = useState(null);
   const [newCategory, setNewCategory] = useState({ name: '', description: '', defaultPriority: 'Medium', slaDays: 3 });
   const [creating, setCreating] = useState(false);
+  const [categoryDrafts, setCategoryDrafts] = useState({});
   const { ruleValue, setField, isDirty, clear } = useRoutingDrafts(meta);
   useEffect(() => { endpoints.complaintMeta().then(setMeta); }, []);
+
+  const categoryValue = (category, field) => categoryDrafts[category.id]?.[field] ?? category[field];
+  const setCategoryField = (id, field, value) => setCategoryDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
+  const categoryDirty = (category) => Boolean(categoryDrafts[category.id]);
+
+  const saveCategory = async (category) => {
+    setSavingId(`cat-${category.id}`);
+    try {
+      const updated = await endpoints.updateComplaintCategory(category.id, {
+        name: categoryValue(category, 'name'),
+        description: categoryValue(category, 'description'),
+        defaultPriority: categoryValue(category, 'defaultPriority'),
+        slaDays: Number(categoryValue(category, 'slaDays'))
+      });
+      setMeta((current) => ({ ...current, categories: current.categories.map((item) => (item.id === updated.id ? updated : item)) }));
+      setCategoryDrafts((current) => {
+        const next = { ...current };
+        delete next[category.id];
+        return next;
+      });
+      toast.success(`Category "${updated.name}" updated.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not update category'));
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const removeCategory = async (category) => {
+    if (!window.confirm(`Delete the category "${category.name}"? Its routing rules are removed with it.`)) return;
+    setSavingId(`cat-${category.id}`);
+    try {
+      await endpoints.deleteComplaintCategory(category.id);
+      setMeta((current) => ({
+        ...current,
+        categories: current.categories.filter((item) => item.id !== category.id),
+        routingRules: current.routingRules.filter((item) => item.categoryId !== category.id)
+      }));
+      toast.success(`Category "${category.name}" was deleted.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete category'));
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const saveRule = async (rule) => {
     setSavingId(rule.id);
@@ -748,11 +837,45 @@ export const ComplaintTypeManagement = () => {
             <article key={category.id} className="card p-5">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-bold text-slate-950">{category.name}</h2>
-                <StatusBadge value={rule?.priority || category.defaultPriority} />
+                <div className="flex items-center gap-2">
+                  <StatusBadge value={rule?.priority || category.defaultPriority} />
+                  <button
+                    className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
+                    disabled={savingId === `cat-${category.id}`}
+                    onClick={() => removeCategory(category)}
+                    aria-label={`Delete ${category.name}`}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{category.description}</p>
+
+              <div className="mt-4 grid gap-3 rounded-md border border-slate-200 p-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Category details</p>
+                <Field label="Name" value={categoryValue(category, 'name')} onChange={(value) => setCategoryField(category.id, 'name', value)} />
+                <Field label="Description" value={categoryValue(category, 'description') || ''} onChange={(value) => setCategoryField(category.id, 'description', value)} />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <span className="label">Default priority</span>
+                    <select className="input" value={categoryValue(category, 'defaultPriority')} onChange={(event) => setCategoryField(category.id, 'defaultPriority', event.target.value)}>
+                      {['Low', 'Medium', 'High', 'Critical'].map((priority) => <option key={priority}>{priority}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="label">SLA days</span>
+                    <input className="input" type="number" min="1" value={categoryValue(category, 'slaDays')} onChange={(event) => setCategoryField(category.id, 'slaDays', Number(event.target.value))} />
+                  </label>
+                </div>
+                {categoryDirty(category) && (
+                  <button className="btn-primary" disabled={savingId === `cat-${category.id}`} onClick={() => saveCategory(category)}>
+                    {savingId === `cat-${category.id}` ? 'Saving...' : 'Save Category'}
+                  </button>
+                )}
+              </div>
+
               {rule ? (
-                <div className="mt-4 grid gap-3">
+                <div className="mt-4 grid gap-3 rounded-md border border-slate-200 p-3">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Routing rule</p>
                   <label>
                     <span className="label">Responsible office</span>
                     <select className="input" value={ruleValue(rule, 'officeId')} onChange={(event) => setField(rule.id, 'officeId', event.target.value)}>
@@ -830,11 +953,14 @@ const ComplaintStats = ({ summary }) => (
   </div>
 );
 
-const ComplaintTable = ({ complaints = [], base = '/app/complaints' }) => (
-  <section className="panel overflow-hidden">
-    <table className="w-full text-left text-sm">
+const ComplaintTable = ({ complaints = [], base = '/app/complaints', onDelete = null, busyId = null }) => (
+  <section className="panel overflow-x-auto">
+    <table className="w-full min-w-[760px] text-left text-sm">
       <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-        <tr><th className="px-4 py-3">Tracking</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Due</th></tr>
+        <tr>
+          <th className="px-4 py-3">Tracking</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Due</th>
+          {onDelete && <th className="px-4 py-3" />}
+        </tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
         {complaints.map((complaint) => (
@@ -844,6 +970,18 @@ const ComplaintTable = ({ complaints = [], base = '/app/complaints' }) => (
             <td className="px-4 py-3 text-slate-500">{complaint.assignedOffice}</td>
             <td className="px-4 py-3"><StatusBadge value={complaint.status} /></td>
             <td className="px-4 py-3 text-slate-500">{complaint.dueDate}</td>
+            {onDelete && (
+              <td className="px-4 py-3">
+                <button
+                  className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
+                  disabled={busyId === complaint.trackingNumber}
+                  onClick={() => onDelete(complaint)}
+                  aria-label={`Delete ${complaint.trackingNumber}`}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </td>
+            )}
           </tr>
         ))}
       </tbody>

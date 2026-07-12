@@ -26,12 +26,28 @@ export const complaintController = {
     res.json(await complaintService.rate(req.params.trackingNumber, req.body, req.user));
   }),
 
+  remove: asyncHandler(async (req, res) => {
+    res.json(await complaintService.remove(req.params.trackingNumber, req.user));
+  }),
+
   updateRoutingRule: asyncHandler(async (req, res) => {
     res.json(await complaintService.updateRoutingRule(req.params.id, req.body, req.user));
   }),
 
+  deleteRoutingRule: asyncHandler(async (req, res) => {
+    res.json(await complaintService.deleteRoutingRule(req.params.id, req.user));
+  }),
+
   createCategory: asyncHandler(async (req, res) => {
     res.status(201).json(await complaintService.createCategory({ ...req.body, actor: req.user?.fullName }));
+  }),
+
+  updateCategory: asyncHandler(async (req, res) => {
+    res.json(await complaintService.updateCategory(req.params.id, req.body, req.user));
+  }),
+
+  deleteCategory: asyncHandler(async (req, res) => {
+    res.json(await complaintService.deleteCategory(req.params.id, req.user));
   }),
 
   createRoutingRule: asyncHandler(async (req, res) => {

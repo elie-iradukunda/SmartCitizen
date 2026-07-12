@@ -97,18 +97,22 @@ export const AdminDashboard = () => {
   );
 };
 
-const emptyUser = { fullName: '', email: '', phone: '', password: '', role: 'citizen', district: '' };
+const emptyUser = { fullName: '', email: '', phone: '', password: '', role: 'citizen', district: '', officeId: '' };
 
 export const AdminUsers = () => {
   const toast = useToast();
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
+  const [offices, setOffices] = useState([]);
   const [form, setForm] = useState(emptyUser);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
   const load = () => endpoints.users().then(setUsers);
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    endpoints.complaintMeta().then((meta) => setOffices(meta.offices || []));
+  }, []);
 
   const updateUser = async (id, patch) => {
     setBusyId(id);
@@ -122,6 +126,13 @@ export const AdminUsers = () => {
       setBusyId(null);
     }
   };
+
+  // A staff account with no office can open no cases, so promoting someone to staff
+  // must carry an office with it.
+  const changeRole = (user, role) => updateUser(user.id, {
+    role,
+    ...(role === 'staff' && !user.officeId ? { officeId: offices[0]?.id } : {})
+  });
 
   const createUser = async (event) => {
     event.preventDefault();
@@ -161,27 +172,52 @@ export const AdminUsers = () => {
         <Field label="Password" type="password" value={form.password} onChange={(value) => setForm((f) => ({ ...f, password: value }))} />
         <label>
           <span className="label">Role</span>
-          <select className="input" value={form.role} onChange={(event) => setForm((f) => ({ ...f, role: event.target.value }))}>
+          <select
+            className="input"
+            value={form.role}
+            onChange={(event) => {
+              const role = event.target.value;
+              setForm((f) => ({ ...f, role, officeId: role === 'staff' ? (f.officeId || offices[0]?.id || '') : '' }));
+            }}
+          >
             <option value="citizen">Citizen</option>
             <option value="staff">Administrative Staff</option>
             <option value="admin">Admin</option>
           </select>
         </label>
+        {form.role === 'staff' && (
+          <label>
+            <span className="label">Responsible office</span>
+            <select className="input" value={form.officeId} onChange={(event) => setForm((f) => ({ ...f, officeId: Number(event.target.value) }))} required>
+              <option value="">Select office</option>
+              {offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+            </select>
+          </label>
+        )}
         <div className="flex items-end">
           <button className="btn-primary w-full" disabled={creating}><PlusCircle size={16} />{creating ? 'Adding...' : 'Add User'}</button>
         </div>
       </form>
-      <Table headers={['Name', 'Email', 'Role', 'Location', 'Status', '']}>
+      <Table headers={['Name', 'Email', 'Role', 'Office', 'Location', 'Status', '']}>
         {users.map((user) => (
           <tr key={user.id}>
             <td className="px-4 py-3 font-semibold text-slate-900">{user.fullName}</td>
             <td className="px-4 py-3 text-slate-500">{user.email}</td>
             <td className="px-4 py-3">
-              <select className="input min-w-44" value={user.role} disabled={busyId === user.id} onChange={(event) => updateUser(user.id, { role: event.target.value })}>
+              <select className="input min-w-44" value={user.role} disabled={busyId === user.id} onChange={(event) => changeRole(user, event.target.value)}>
                 <option value="citizen">Citizen</option>
                 <option value="staff">Administrative Staff</option>
                 <option value="admin">Admin</option>
               </select>
+            </td>
+            <td className="px-4 py-3">
+              {user.role === 'staff' ? (
+                <select className="input min-w-48" value={user.officeId || ''} disabled={busyId === user.id} onChange={(event) => updateUser(user.id, { officeId: Number(event.target.value) })}>
+                  {offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+                </select>
+              ) : (
+                <span className="text-slate-400">—</span>
+              )}
             </td>
             <td className="px-4 py-3 text-slate-500">{user.district}</td>
             <td className="px-4 py-3">
@@ -250,8 +286,8 @@ const AdminListPage = ({ title, subtitle, icon: Icon, children, actions = null }
 );
 
 const Table = ({ headers, children }) => (
-  <section className="panel overflow-hidden">
-    <table className="w-full text-left text-sm">
+  <section className="panel overflow-x-auto">
+    <table className="w-full min-w-[900px] text-left text-sm">
       <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{headers.map((header) => <th key={header} className="px-4 py-3">{header}</th>)}</tr></thead>
       <tbody className="divide-y divide-slate-100">{children}</tbody>
     </table>
