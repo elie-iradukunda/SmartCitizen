@@ -12,8 +12,32 @@ import {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const dueDateFromDays = (days) => new Date(Date.now() + Number(days || 3) * 86400000).toISOString().slice(0, 10);
-const categoryOrder = ['service-delay', 'documents', 'infrastructure', 'safety-community', 'misconduct', 'feedback'];
-const officeOrder = ['service-delivery', 'responsible-service-unit', 'infrastructure-office', 'safety-desk', 'senior-administrator', 'customer-care-planning'];
+const categoryOrder = [
+  'service-delay',
+  'documents',
+  'infrastructure',
+  'water-sanitation',
+  'land-housing',
+  'health-hygiene',
+  'safety-community',
+  'market-trade',
+  'education-youth',
+  'misconduct',
+  'feedback'
+];
+const officeOrder = [
+  'service-delivery',
+  'responsible-service-unit',
+  'infrastructure-office',
+  'water-sanitation-unit',
+  'land-housing-office',
+  'health-social-affairs',
+  'safety-desk',
+  'trade-cooperatives-desk',
+  'education-youth-office',
+  'senior-administrator',
+  'customer-care-planning'
+];
 const sortByCodeOrder = (items, order) => [...items].sort((a, b) => {
   const first = order.indexOf(a.code);
   const second = order.indexOf(b.code);
@@ -29,6 +53,8 @@ const includeComplaintRelations = [
 
 const publicComplaint = (record) => {
   const item = record.toJSON ? record.toJSON() : record;
+  const lowRating = Number(item.satisfaction?.score || 0) > 0 && Number(item.satisfaction?.score || 0) <= 2;
+  const overdue = !['Closed', 'Resolved'].includes(item.status) && item.dueDate && item.dueDate < today();
   return {
     id: `cmp-${item.id}`,
     dbId: item.id,
@@ -51,8 +77,11 @@ const publicComplaint = (record) => {
     escalatedTo: item.escalatedTo,
     office: item.office,
     channel: item.channel,
+    submissionMode: item.submissionMode,
+    evidenceType: item.evidenceType,
     attachmentName: item.attachmentName,
     attachmentPath: item.attachmentPath,
+    followUpRequired: item.status === 'Escalated' || overdue || lowRating,
     dueDate: item.dueDate,
     resolvedAt: item.resolvedAt,
     closedAt: item.closedAt,
@@ -185,6 +214,15 @@ const notifyCitizen = async (complaint, title, message) => ComplaintNotification
   title,
   message
 });
+
+const evidenceTypeFromFile = (file) => {
+  const mime = file?.mimetype || '';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('audio/')) return 'audio';
+  return file ? 'file' : '';
+};
 
 const createResponse = async (complaint, responder, responseText, statusUpdate, responderId = null) => {
   if (!responseText?.trim()) return null;
@@ -420,6 +458,8 @@ export const complaintService = {
       status: 'Assigned',
       assignedTo: office.contactPerson,
       channel: payload.channel || 'Web Portal',
+      submissionMode: payload.submissionMode || payload.channel || 'Typed form',
+      evidenceType: evidenceTypeFromFile(file),
       attachmentName: file?.originalname || payload.attachmentName || '',
       attachmentPath: file ? `/uploads/${file.filename}` : '',
       dueDate: dueDateFromDays(rule.slaDays || category.slaDays)
@@ -509,7 +549,26 @@ export const complaintService = {
       }
     });
     await rating.update({ score, comment: payload.comment || rating.comment, ratedAt: new Date() });
-    await complaint.update({ status: 'Closed', closedAt: new Date(), resolvedAt: complaint.resolvedAt || new Date() });
+
+    if (score <= 2) {
+      await complaint.update({
+        status: 'Escalated',
+        priority: 'Critical',
+        escalatedTo: 'Sector Executive Office',
+        closedAt: null,
+        resolvedAt: complaint.resolvedAt || new Date()
+      });
+      await createResponse(
+        complaint,
+        'System',
+        `Citizen marked the response as unsatisfactory (${score}/5). The case was returned to the Sector Executive Office for follow-up.`,
+        'Escalated'
+      );
+      await notifyCitizen(complaint, 'Complaint escalated', `${trackingNumber} was escalated to the Sector Executive Office because you were not satisfied with the response.`);
+    } else {
+      await complaint.update({ status: 'Closed', closedAt: new Date(), resolvedAt: complaint.resolvedAt || new Date() });
+    }
+
     await logAction(actor?.fullName || 'Citizen', `Rated complaint ${trackingNumber} with ${score} stars`, { entity: 'satisfaction_rating', entityId: rating.id });
     return publicComplaint(await loadComplaint(trackingNumber));
   },
@@ -580,12 +639,14 @@ export const complaintService = {
             escalated: 0,
             resolved: 0,
             overdue: 0,
+            needsAdminAttention: 0,
             averageSatisfaction: 0
           },
           byStatus: [],
           byCategory: [],
           byOffice: [],
           recentComplaints: [],
+          adminAttention: [],
           auditLogs: []
         };
       }
@@ -601,6 +662,12 @@ export const complaintService = {
     const complaintIds = complaints.map((complaint) => complaint.id);
     const ratings = complaintIds.length ? await SatisfactionRating.findAll({ where: { complaintId: complaintIds } }) : [];
     const averageSatisfaction = ratings.length ? ratings.reduce((sum, rating) => sum + Number(rating.score), 0) / ratings.length : 0;
+    const overdueComplaints = active.filter((complaint) => complaint.dueDate < today());
+    const attentionComplaints = complaints.filter((complaint) => {
+      const lowRating = Number(complaint.satisfaction?.score || 0) > 0 && Number(complaint.satisfaction?.score || 0) <= 2;
+      const overdue = !['Closed', 'Resolved'].includes(complaint.status) && complaint.dueDate < today();
+      return complaint.status === 'Escalated' || overdue || lowRating;
+    });
 
     const categories = await ComplaintCategory.findAll({ where: { active: true }, order: [['id', 'ASC']] });
     const offices = await Office.findAll({ where: { active: true }, order: [['id', 'ASC']] });
@@ -626,13 +693,15 @@ export const complaintService = {
         openComplaints: active.length,
         escalated: complaints.filter((complaint) => complaint.status === 'Escalated').length,
         resolved: complaints.filter((complaint) => ['Resolved', 'Closed'].includes(complaint.status)).length,
-        overdue: active.filter((complaint) => complaint.dueDate < today()).length,
+        overdue: overdueComplaints.length,
+        needsAdminAttention: attentionComplaints.length,
         averageSatisfaction: Number(averageSatisfaction.toFixed(1))
       },
       byStatus: statusCounts(complaints),
       byCategory,
       byOffice,
       recentComplaints: complaints.slice(0, 6).map(publicComplaint),
+      adminAttention: attentionComplaints.slice(0, 8).map(publicComplaint),
       auditLogs: auditLogs.map((log) => ({
         id: `audit-${log.id}`,
         actor: log.actor,

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, FileText, ListChecks, Paperclip, PlusCircle, Send, Star, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileText, ListChecks, Mic, Paperclip, PlusCircle, Send, Square, Star, Trash2, UploadCloud } from 'lucide-react';
 import { API_ORIGIN, endpoints } from '../../api/client.js';
 import { CategoryDonut } from '../../components/Charts.jsx';
 import { LoadingState } from '../../components/LoadingState.jsx';
@@ -9,16 +9,14 @@ import { StatCard } from '../../components/StatCard.jsx';
 import { StatusBadge } from '../../components/StatusBadge.jsx';
 import { useToast, errorMessage } from '../../context/ToastContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { kacyiruDefaults, kacyiruLocation, villagesForCell } from '../../data/kacyiruLocations.js';
 
 const defaultComplaint = {
   type: '',
   description: '',
   citizenPhone: '',
-  province: 'Kigali City',
-  district: 'Gasabo',
-  sector: 'Kacyiru',
-  cell: '',
-  village: ''
+  ...kacyiruDefaults,
+  voiceLanguage: 'rw-RW'
 };
 
 const formatDate = (value) => (value ? new Date(value).toLocaleString() : 'Not set');
@@ -33,33 +31,97 @@ const isOverdue = (complaint) => !isTerminal(complaint) && complaint.dueDate && 
 export const SubmitComplaint = () => {
   const { user } = useAuth();
   const toast = useToast();
-  const [form, setForm] = useState({ ...defaultComplaint, citizenPhone: user?.phone || '' });
+  const [form, setForm] = useState({
+    ...defaultComplaint,
+    citizenPhone: user?.phone || '',
+    cell: user?.cell || defaultComplaint.cell,
+    village: user?.village || defaultComplaint.village
+  });
   const [file, setFile] = useState(null);
   const [meta, setMeta] = useState(null);
   const [created, setCreated] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [usedVoice, setUsedVoice] = useState(false);
+  const recognitionRef = useRef(null);
 
   useEffect(() => { endpoints.complaintMeta().then(setMeta); }, []);
 
-  const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  useEffect(() => () => recognitionRef.current?.stop(), []);
+
+  const update = (field, value) => setForm((current) => {
+    if (field === 'cell') {
+      return { ...current, cell: value, village: villagesForCell(value)[0] || '' };
+    }
+    return { ...current, [field]: value };
+  });
+
+  const toggleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Voice input is not supported in this browser.');
+      return;
+    }
+
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = form.voiceLanguage;
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .slice(event.resultIndex)
+        .map((result) => result[0].transcript)
+        .join(' ')
+        .trim();
+      if (!transcript) return;
+      setUsedVoice(true);
+      setForm((current) => ({
+        ...current,
+        description: [current.description, transcript].filter(Boolean).join(' ').trim()
+      }));
+    };
+    recognition.onerror = () => {
+      setListening(false);
+      toast.error('Voice input stopped. Please try again or type the complaint.');
+    };
+    recognition.onend = () => setListening(false);
+    recognitionRef.current = recognition;
+    recognition.start();
+    setListening(true);
+  };
 
   const submit = async (event) => {
     event.preventDefault();
     setSaving(true);
     try {
       const location = [form.sector, form.district, form.province].filter(Boolean).join(', ');
+      const submissionMode = usedVoice ? 'Voice Assisted' : file?.type?.startsWith('video/') ? 'Video Evidence' : 'Typed form';
+      const channel = usedVoice ? 'Voice Assisted' : 'Web Portal';
+      const payload = { ...form, location, submissionMode, channel };
       let complaint;
       if (file) {
         const formData = new FormData();
-        Object.entries({ ...form, location }).forEach(([key, value]) => formData.append(key, value));
+        Object.entries(payload).forEach(([key, value]) => formData.append(key, value));
         formData.append('attachment', file);
         complaint = await endpoints.createComplaint(formData);
       } else {
-        complaint = await endpoints.createComplaint({ ...form, location });
+        complaint = await endpoints.createComplaint(payload);
       }
       setCreated(complaint);
-      setForm({ ...defaultComplaint, citizenPhone: user?.phone || '' });
+      setForm({
+        ...defaultComplaint,
+        citizenPhone: user?.phone || '',
+        cell: user?.cell || defaultComplaint.cell,
+        village: user?.village || defaultComplaint.village
+      });
       setFile(null);
+      setUsedVoice(false);
       toast.success(`Complaint submitted. Tracking number ${complaint.trackingNumber}.`);
     } catch (err) {
       toast.error(errorMessage(err, 'Could not submit complaint'));
@@ -100,25 +162,57 @@ export const SubmitComplaint = () => {
               <span className="label">Description</span>
               <textarea className="input min-h-36" value={form.description} onChange={(event) => update('description', event.target.value)} placeholder="Explain what happened, when it happened, and what help you expect." required />
             </label>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label="Province" value={form.province} onChange={(value) => update('province', value)} />
-              <Field label="District" value={form.district} onChange={(value) => update('district', value)} />
-              <Field label="Sector" value={form.sector} onChange={(value) => update('sector', value)} />
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <label className="sm:w-48">
+                  <span className="label">Voice Language</span>
+                  <select className="input" value={form.voiceLanguage} onChange={(event) => update('voiceLanguage', event.target.value)}>
+                    <option value="rw-RW">Kinyarwanda</option>
+                    <option value="en-US">English</option>
+                  </select>
+                </label>
+                <button type="button" className={listening ? 'btn-secondary text-red-700' : 'btn-secondary'} onClick={toggleVoiceInput}>
+                  {listening ? <Square size={16} /> : <Mic size={16} />}
+                  {listening ? 'Stop Speaking' : 'Speak Complaint'}
+                </button>
+                {usedVoice && <StatusBadge value="Voice Assisted" />}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Use speech to fill the description, then review the text before submitting.</p>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
-              <Field label="Cell" value={form.cell} onChange={(value) => update('cell', value)} />
-              <Field label="Village" value={form.village} onChange={(value) => update('village', value)} />
+              <Field label="Province" value={form.province} readOnly />
+              <Field label="District" value={form.district} readOnly />
+              <Field label="Sector" value={form.sector} readOnly />
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <label>
+                <span className="label">Cell</span>
+                <select className="input" value={form.cell} onChange={(event) => update('cell', event.target.value)} required>
+                  {kacyiruLocation.cells.map((cell) => <option key={cell.name}>{cell.name}</option>)}
+                </select>
+              </label>
+              <label>
+                <span className="label">Village</span>
+                <select className="input" value={form.village} onChange={(event) => update('village', event.target.value)} required>
+                  {villagesForCell(form.cell).map((village) => <option key={village}>{village}</option>)}
+                </select>
+              </label>
               <Field label="Phone" value={form.citizenPhone} onChange={(value) => update('citizenPhone', value)} />
             </div>
             <label>
-              <span className="label">Attachment (optional)</span>
+              <span className="label">Evidence Upload (image, PDF, or video)</span>
               <input
                 className="input"
                 type="file"
-                accept="image/*,.pdf"
+                accept="image/*,video/*,.pdf"
                 onChange={(event) => setFile(event.target.files?.[0] || null)}
               />
-              {file && <p className="mt-1 flex items-center gap-1 text-xs text-slate-500"><Paperclip size={13} />{file.name}</p>}
+              {file && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                  <UploadCloud size={13} />
+                  {file.name} {file.type?.startsWith('video/') ? '(video evidence)' : ''}
+                </p>
+              )}
             </label>
           </div>
           <div className="mt-6 flex justify-end">
@@ -166,7 +260,9 @@ export const MyComplaints = () => {
       const updated = await endpoints.rateComplaint(trackingNumber, rating);
       setComplaints((items) => items.map((item) => (item.trackingNumber === trackingNumber ? updated : item)));
       setRating({ score: 5, comment: '' });
-      toast.success('Thank you, your rating was saved.');
+      toast.success(updated.status === 'Escalated'
+        ? 'Your feedback was saved and the case was escalated to sector administration.'
+        : 'Thank you, your rating was saved.');
     } catch (err) {
       toast.error(errorMessage(err, 'Could not save rating'));
     } finally {
@@ -193,6 +289,7 @@ export const MyComplaints = () => {
               {['Resolved', 'Closed'].includes(complaint.status) && !complaint.satisfaction && (
                 <div className="w-full rounded-md border border-slate-200 p-3 lg:w-72">
                   <p className="text-sm font-bold text-slate-900">Rate resolution</p>
+                  <p className="mt-1 text-xs text-slate-500">A 1-2 star rating sends the case back to sector administration.</p>
                   <select className="input mt-2" value={rating.score} onChange={(event) => setRating({ ...rating, score: Number(event.target.value) })}>
                     {[5, 4, 3, 2, 1].map((value) => <option key={value} value={value}>{value} stars</option>)}
                   </select>
@@ -222,6 +319,7 @@ export const ComplaintDetails = () => {
   }, [trackingNumber]);
 
   if (!complaint) return <LoadingState />;
+  const evidenceUrl = complaint.attachmentPath ? `${API_ORIGIN}${complaint.attachmentPath}` : '';
 
   return (
     <div>
@@ -253,19 +351,21 @@ export const ComplaintDetails = () => {
           <h2 className="font-bold text-slate-950">Routing Information</h2>
           <Info label="Assigned Office" value={complaint.assignedOffice} />
           <Info label="Assigned Officer" value={complaint.assignedTo} />
+          <Info label="Submission Mode" value={complaint.submissionMode || complaint.channel || 'Typed form'} />
           <Info label="Location" value={complaint.location} />
           <Info label="Cell / Village" value={[complaint.cell, complaint.village].filter(Boolean).join(' / ') || 'Not provided'} />
           <Info label="Submitted" value={formatDate(complaint.createdAt)} />
           <Info label="Due Date" value={complaint.dueDate} />
           {complaint.attachmentPath ? (
             <div className="mt-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Attachment</p>
-              <a
-                href={`${API_ORIGIN}${complaint.attachmentPath}`}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1 flex items-center gap-1 text-sm font-semibold text-brand-600 hover:underline"
-              >
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Evidence</p>
+              {complaint.evidenceType === 'video' && (
+                <video className="mt-2 aspect-video w-full rounded-md border border-slate-200 bg-black" controls src={evidenceUrl} />
+              )}
+              {complaint.evidenceType === 'image' && (
+                <img className="mt-2 max-h-72 w-full rounded-md border border-slate-200 object-cover" src={evidenceUrl} alt={complaint.attachmentName || 'Complaint evidence'} />
+              )}
+              <a href={evidenceUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1 text-sm font-semibold text-brand-600 hover:underline">
                 <Paperclip size={14} />
                 {complaint.attachmentName || 'View attachment'}
               </a>
@@ -751,6 +851,41 @@ export const AdminComplaintReports = () => {
     <div>
       <PageHeader title="Complaint Reports" subtitle="Management dashboard for categories, offices, status, response control, escalation, and satisfaction." />
       <ComplaintStats summary={reports.summary} />
+      {reports.adminAttention?.length > 0 && (
+        <section className="panel mt-6 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold text-slate-950">Needs Sector Admin Attention</h2>
+              <p className="mt-1 text-sm text-slate-500">Escalated, overdue, or low-rated cases that need follow-up with the responsible office.</p>
+            </div>
+            <StatusBadge value={`${reports.summary.needsAdminAttention} cases`} />
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr><th className="px-4 py-3">Tracking</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Officer</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Due</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {reports.adminAttention.map((complaint) => (
+                  <tr key={complaint.trackingNumber}>
+                    <td className="px-4 py-3 font-semibold text-slate-900"><Link to={`/admin/complaints/${complaint.trackingNumber}`} className="hover:text-brand-600">{complaint.trackingNumber}</Link></td>
+                    <td className="px-4 py-3 text-slate-500">{complaint.assignedOffice}</td>
+                    <td className="px-4 py-3 text-slate-500">{complaint.assignedTo}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        {complaint.status === 'Escalated' && <StatusBadge value="Escalated" />}
+                        {isOverdue(complaint) && <StatusBadge value="Overdue" />}
+                        {complaint.satisfaction?.score <= 2 && <StatusBadge value={`${complaint.satisfaction.score} star rating`} />}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">{complaint.dueDate}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       <div className="mt-6 grid gap-6 xl:grid-cols-3">
         <section className="panel p-5"><h2 className="mb-4 font-bold text-slate-950">By Status</h2><CategoryDonut data={reports.byStatus} /></section>
         <section className="panel p-5"><h2 className="mb-4 font-bold text-slate-950">By Category</h2><CategoryDonut data={reports.byCategory} /></section>
@@ -1170,10 +1305,11 @@ export const ComplaintNotifications = () => {
 };
 
 const ComplaintStats = ({ summary }) => (
-  <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+  <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
     <StatCard label="Total" value={summary.totalComplaints} icon={FileText} />
     <StatCard label="Open" value={summary.openComplaints} icon={ListChecks} tone="amber" />
     <StatCard label="Escalated" value={summary.escalated} icon={AlertTriangle} tone="rose" />
+    <StatCard label="Needs Attention" value={summary.needsAdminAttention || 0} icon={AlertTriangle} tone="rose" />
     <StatCard label="Resolved" value={summary.resolved} icon={CheckCircle2} tone="emerald" />
     <StatCard label="Overdue" value={summary.overdue} icon={AlertTriangle} tone="violet" />
     <StatCard label="Avg Rating" value={summary.averageSatisfaction} icon={Star} tone="blue" />
@@ -1216,10 +1352,10 @@ const ComplaintTable = ({ complaints = [], base = '/app/complaints', onDelete = 
   </section>
 );
 
-const Field = ({ label, value, onChange, placeholder = '' }) => (
+const Field = ({ label, value, onChange = () => {}, placeholder = '', readOnly = false }) => (
   <label>
     <span className="label">{label}</span>
-    <input className="input" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+    <input className="input" value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
   </label>
 );
 

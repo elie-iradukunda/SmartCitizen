@@ -2,6 +2,11 @@ import { User } from '../models/index.js';
 import { publicUser } from './serializers.js';
 
 const allowedRoles = ['citizen', 'staff', 'admin'];
+const kacyiruDefaults = {
+  province: 'Kigali City',
+  district: 'Gasabo',
+  sector: 'Kacyiru'
+};
 
 export const authService = {
   async login(email, password) {
@@ -32,11 +37,16 @@ export const authService = {
       email: payload.email,
       password: payload.password,
       phone: payload.phone || '',
+      nationalId: payload.nationalId || '',
       role: 'citizen',
       gender: payload.gender || '',
-      province: payload.province || '',
-      district: payload.district || '',
-      sector: payload.sector || '',
+      province: payload.province || kacyiruDefaults.province,
+      district: payload.district || kacyiruDefaults.district,
+      sector: payload.sector || kacyiruDefaults.sector,
+      cell: payload.cell || '',
+      village: payload.village || '',
+      address: payload.address || '',
+      preferredLanguage: payload.preferredLanguage || 'English',
       avatar: payload.avatar || 'https://images.unsplash.com/photo-1508214751196-bcfd4ca60f91?auto=format&fit=crop&w=160&q=80'
     });
 
@@ -65,11 +75,27 @@ export const authService = {
       error.status = 404;
       throw error;
     }
-    const editableFields = ['fullName', 'phone', 'gender', 'province', 'district', 'sector', 'avatar'];
+    const editableFields = [
+      'fullName',
+      'phone',
+      'nationalId',
+      'gender',
+      'province',
+      'district',
+      'sector',
+      'cell',
+      'village',
+      'address',
+      'preferredLanguage',
+      'avatar'
+    ];
     const updates = {};
     editableFields.forEach((field) => {
       if (payload[field] !== undefined) updates[field] = payload[field];
     });
+    updates.province ||= kacyiruDefaults.province;
+    updates.district ||= kacyiruDefaults.district;
+    updates.sector ||= kacyiruDefaults.sector;
     await user.update(updates);
     return publicUser(user);
   }

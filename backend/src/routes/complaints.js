@@ -4,7 +4,7 @@ import { complaintController } from '../controllers/complaintController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
-const upload = multer({ dest: 'uploads/', limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ dest: 'uploads/', limits: { fileSize: 50 * 1024 * 1024 } });
 
 router.get('/public-summary', complaintController.publicSummary);
 

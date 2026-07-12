@@ -2,6 +2,11 @@ import { AuditLog, Complaint, Office, User } from '../models/index.js';
 import { publicUser, serializeAuditLog } from './serializers.js';
 
 const allowedRoles = ['citizen', 'staff', 'admin'];
+const kacyiruDefaults = {
+  province: 'Kigali City',
+  district: 'Gasabo',
+  sector: 'Kacyiru'
+};
 
 // Staff only ever see the cases of the office they belong to, so a staff account
 // without an office can open nothing. Citizens and admins are never office-bound.
@@ -55,11 +60,16 @@ export const adminService = {
       email: payload.email,
       password: payload.password,
       phone: payload.phone || '',
+      nationalId: payload.nationalId || '',
       role,
       gender: payload.gender || '',
-      province: payload.province || '',
-      district: payload.district || '',
-      sector: payload.sector || '',
+      province: payload.province || kacyiruDefaults.province,
+      district: payload.district || kacyiruDefaults.district,
+      sector: payload.sector || kacyiruDefaults.sector,
+      cell: payload.cell || '',
+      village: payload.village || '',
+      address: payload.address || '',
+      preferredLanguage: payload.preferredLanguage || 'English',
       officeId: await resolveOfficeId(role, payload.officeId),
       status: payload.status || 'active'
     });

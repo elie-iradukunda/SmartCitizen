@@ -51,6 +51,8 @@ export const defineComplaint = (sequelize) => sequelize.define('Complaint', {
   assignedTo: DataTypes.STRING(160),
   escalatedTo: DataTypes.STRING(180),
   channel: { type: DataTypes.STRING(80), defaultValue: 'Web Portal' },
+  submissionMode: { type: DataTypes.STRING(80), defaultValue: 'Typed form' },
+  evidenceType: DataTypes.STRING(40),
   attachmentName: DataTypes.STRING(220),
   attachmentPath: DataTypes.STRING(255),
   dueDate: DataTypes.DATEONLY,

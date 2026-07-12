@@ -5,6 +5,7 @@ export const defineUser = (sequelize) => sequelize.define('User', {
   email: { type: DataTypes.STRING(190), allowNull: false, unique: true },
   password: { type: DataTypes.STRING(255), allowNull: false },
   phone: DataTypes.STRING(40),
+  nationalId: DataTypes.STRING(40),
   role: {
     type: DataTypes.ENUM('citizen', 'staff', 'admin'),
     defaultValue: 'citizen'
@@ -13,6 +14,10 @@ export const defineUser = (sequelize) => sequelize.define('User', {
   province: DataTypes.STRING(120),
   district: DataTypes.STRING(120),
   sector: DataTypes.STRING(120),
+  cell: DataTypes.STRING(120),
+  village: DataTypes.STRING(120),
+  address: DataTypes.STRING(240),
+  preferredLanguage: { type: DataTypes.STRING(40), defaultValue: 'English' },
   avatar: DataTypes.TEXT,
   officeId: DataTypes.INTEGER,
   status: { type: DataTypes.ENUM('active', 'suspended', 'pending'), defaultValue: 'active' }

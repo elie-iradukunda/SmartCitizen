@@ -37,9 +37,10 @@ export const AdminDashboard = () => {
         </div>
 
         <div className="grid gap-5 p-5">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
             <AdminStat label="Total Complaints" value={complaints.length} color="bg-violet-700" />
             <AdminStat label="This Month" value={thisMonth} color="bg-blue-600" />
+            <AdminStat label="Needs Attention" value={reports.summary.needsAdminAttention || 0} color="bg-red-600" />
             <AdminStat label="Resolved" value={reports.summary.resolved} color="bg-emerald-600" />
             <AdminStat label="Satisfaction Rate" value={satisfactionRate} color="bg-amber-500" />
           </div>

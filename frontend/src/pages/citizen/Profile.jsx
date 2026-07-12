@@ -5,15 +5,7 @@ import { LoadingState } from '../../components/LoadingState.jsx';
 import { PageHeader } from '../../components/PageHeader.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast, errorMessage } from '../../context/ToastContext.jsx';
-
-const fields = [
-  { key: 'fullName', label: 'Full Name' },
-  { key: 'phone', label: 'Phone' },
-  { key: 'gender', label: 'Gender' },
-  { key: 'province', label: 'Province' },
-  { key: 'district', label: 'District' },
-  { key: 'sector', label: 'Sector' }
-];
+import { kacyiruDefaults, kacyiruLocation, villagesForCell } from '../../data/kacyiruLocations.js';
 
 export const Profile = () => {
   const { updateUser } = useAuth();
@@ -22,7 +14,15 @@ export const Profile = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    endpoints.getProfile().then(setForm).catch((err) => toast.error(errorMessage(err, 'Could not load profile')));
+    endpoints.getProfile()
+      .then((profile) => setForm({
+        ...profile,
+        ...kacyiruDefaults,
+        cell: profile.cell || kacyiruDefaults.cell,
+        village: profile.village || kacyiruDefaults.village,
+        preferredLanguage: profile.preferredLanguage || 'Kinyarwanda'
+      }))
+      .catch((err) => toast.error(errorMessage(err, 'Could not load profile')));
   }, []);
 
   if (!form) return <LoadingState />;
@@ -36,10 +36,15 @@ export const Profile = () => {
       const updated = await endpoints.updateProfile({
         fullName: form.fullName,
         phone: form.phone,
+        nationalId: form.nationalId,
         gender: form.gender,
-        province: form.province,
-        district: form.district,
-        sector: form.sector
+        province: kacyiruDefaults.province,
+        district: kacyiruDefaults.district,
+        sector: kacyiruDefaults.sector,
+        cell: form.cell,
+        village: form.village,
+        address: form.address,
+        preferredLanguage: form.preferredLanguage
       });
       updateUser(updated);
       toast.success('Profile updated.');
@@ -62,12 +67,49 @@ export const Profile = () => {
           </div>
         </div>
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          {fields.map((field) => (
-            <label key={field.key}>
-              <span className="label">{field.label}</span>
-              <input className="input" value={form[field.key] || ''} onChange={(event) => update(field.key, event.target.value)} />
-            </label>
-          ))}
+          <Field label="Full Name" value={form.fullName || ''} onChange={(value) => update('fullName', value)} />
+          <Field label="Phone" value={form.phone || ''} onChange={(value) => update('phone', value)} />
+          <Field label="National ID / Citizen ID" value={form.nationalId || ''} onChange={(value) => update('nationalId', value)} />
+          <label>
+            <span className="label">Gender</span>
+            <select className="input" value={form.gender || ''} onChange={(event) => update('gender', event.target.value)}>
+              <option value="">Select gender</option>
+              <option>Female</option>
+              <option>Male</option>
+              <option>Other</option>
+            </select>
+          </label>
+          <Field label="Province" value={kacyiruDefaults.province} readOnly />
+          <Field label="District" value={kacyiruDefaults.district} readOnly />
+          <Field label="Sector" value={kacyiruDefaults.sector} readOnly />
+          <label>
+            <span className="label">Cell</span>
+            <select
+              className="input"
+              value={form.cell || kacyiruDefaults.cell}
+              onChange={(event) => {
+                const cell = event.target.value;
+                update('cell', cell);
+                update('village', villagesForCell(cell)[0] || '');
+              }}
+            >
+              {kacyiruLocation.cells.map((cell) => <option key={cell.name}>{cell.name}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="label">Village</span>
+            <select className="input" value={form.village || villagesForCell(form.cell || kacyiruDefaults.cell)[0] || ''} onChange={(event) => update('village', event.target.value)}>
+              {villagesForCell(form.cell || kacyiruDefaults.cell).map((village) => <option key={village}>{village}</option>)}
+            </select>
+          </label>
+          <Field label="Address / Street" value={form.address || ''} onChange={(value) => update('address', value)} />
+          <label>
+            <span className="label">Preferred Language</span>
+            <select className="input" value={form.preferredLanguage || 'Kinyarwanda'} onChange={(event) => update('preferredLanguage', event.target.value)}>
+              <option>Kinyarwanda</option>
+              <option>English</option>
+            </select>
+          </label>
         </div>
         <div className="mt-6 flex justify-end">
           <button className="btn-primary" disabled={saving}>
@@ -79,3 +121,10 @@ export const Profile = () => {
     </div>
   );
 };
+
+const Field = ({ label, value, onChange = () => {}, readOnly = false }) => (
+  <label>
+    <span className="label">{label}</span>
+    <input className="input" value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
+  </label>
+);
