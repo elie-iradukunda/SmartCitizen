@@ -218,35 +218,65 @@ export const AdminSetup = () => {
   };
 
   return (
-    <AdminListPage title="Complaint Setup" subtitle="Configure departments, complaint categories, routing responsibilities, and official accounts from one place." icon={ClipboardList}>
+    <AdminListPage title="Complaint Setup" subtitle="Build the complaint workflow in this order: department, category, then official account." icon={ClipboardList}>
       <div className="grid gap-4 xl:grid-cols-3">
-        <SetupStep number="1" title="Create Department" text="Add the office responsible for solving a group of complaints." />
-        <SetupStep number="2" title="Add Category & Route" text="Create a complaint type and immediately assign it to a department." />
-        <SetupStep number="3" title="Create Official Account" text="Give each officer credentials and link them to one department." />
+        <SetupStep number="1" title="Create Department" text="Add the office that will solve a type of citizen complaint." />
+        <SetupStep number="2" title="Add Category & Route" text="Create the complaint type citizens will select, then choose the department that receives it." />
+        <SetupStep number="3" title="Create Official Account" text="Create the officer login and connect that officer to one department." />
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-3">
         <form onSubmit={createOffice} className="panel p-5">
           <h2 className="font-bold text-slate-950">Department / Office</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Use this when the responsible office is not yet in the system. If the office already exists, go straight to step 2.</p>
           <div className="mt-4 grid gap-3">
-            <Field label="Department name" value={officeForm.name} onChange={(value) => setOfficeForm((form) => ({ ...form, name: value }))} />
-            <Field label="Lead officer" value={officeForm.contactPerson} onChange={(value) => setOfficeForm((form) => ({ ...form, contactPerson: value }))} />
-            <Field label="Phone" value={officeForm.phone} onChange={(value) => setOfficeForm((form) => ({ ...form, phone: value }))} />
-            <Field label="Email" value={officeForm.email} onChange={(value) => setOfficeForm((form) => ({ ...form, email: value }))} />
+            <Field
+              label="Department name"
+              value={officeForm.name}
+              onChange={(value) => setOfficeForm((form) => ({ ...form, name: value }))}
+              placeholder="Example: Infrastructure, Water and Sanitation Office"
+              hint="This name appears in routing and staff dashboards."
+              required
+            />
+            <Field
+              label="Lead officer"
+              value={officeForm.contactPerson}
+              onChange={(value) => setOfficeForm((form) => ({ ...form, contactPerson: value }))}
+              placeholder="Example: Eric Ndayisenga"
+              hint="The main person citizens and admins see as responsible."
+            />
+            <Field label="Phone" value={officeForm.phone} onChange={(value) => setOfficeForm((form) => ({ ...form, phone: value }))} placeholder="+250 788 300 103" />
+            <Field label="Email" value={officeForm.email} onChange={(value) => setOfficeForm((form) => ({ ...form, email: value }))} placeholder="office@kacyiru.gov.rw" />
             <button className="btn-primary" disabled={busy === 'office'}><PlusCircle size={16} />{busy === 'office' ? 'Adding...' : 'Add Department'}</button>
           </div>
         </form>
 
         <form onSubmit={createCategoryAndRoute} className="panel p-5">
           <h2 className="font-bold text-slate-950">Complaint Category & Responsibility</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">This is what a citizen chooses when submitting a complaint. The selected department receives every case in this category.</p>
           <div className="mt-4 grid gap-3">
-            <Field label="Complaint category" value={categoryForm.name} onChange={(value) => setCategoryForm((form) => ({ ...form, name: value }))} />
-            <Field label="Description" value={categoryForm.description} onChange={(value) => setCategoryForm((form) => ({ ...form, description: value }))} />
+            <Field
+              label="Complaint category"
+              value={categoryForm.name}
+              onChange={(value) => setCategoryForm((form) => ({ ...form, name: value }))}
+              placeholder="Example: Citizen Services and Documents"
+              hint="Keep it broad and clear. Citizens should understand it immediately."
+              required
+            />
+            <Field
+              label="Description"
+              value={categoryForm.description}
+              onChange={(value) => setCategoryForm((form) => ({ ...form, description: value }))}
+              placeholder="Example: Certificates, documents, permits, delayed service, and application follow-up."
+              hint="Describe the complaints that belong in this category."
+              required
+            />
             <label>
               <span className="label">Responsible department</span>
               <select className="input" value={categoryForm.officeId} onChange={(event) => setCategoryForm((form) => ({ ...form, officeId: event.target.value }))}>
                 {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
               </select>
+              <p className="mt-1 text-xs text-slate-500">New complaints in this category go directly to this department.</p>
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label>
@@ -254,8 +284,16 @@ export const AdminSetup = () => {
                 <select className="input" value={categoryForm.defaultPriority} onChange={(event) => setCategoryForm((form) => ({ ...form, defaultPriority: event.target.value }))}>
                   {priorities.map((priority) => <option key={priority}>{priority}</option>)}
                 </select>
+                <p className="mt-1 text-xs text-slate-500">Default urgency for this type of complaint.</p>
               </label>
-              <Field label="SLA days" type="number" value={categoryForm.slaDays} onChange={(value) => setCategoryForm((form) => ({ ...form, slaDays: Number(value) }))} />
+              <Field
+                label="SLA days"
+                type="number"
+                value={categoryForm.slaDays}
+                onChange={(value) => setCategoryForm((form) => ({ ...form, slaDays: Number(value) }))}
+                hint="Number of days the department has to respond."
+                required
+              />
             </div>
             <button className="btn-primary" disabled={busy === 'category'}><PlusCircle size={16} />{busy === 'category' ? 'Adding...' : 'Add Category & Route'}</button>
           </div>
@@ -263,16 +301,18 @@ export const AdminSetup = () => {
 
         <form onSubmit={createStaffAccount} className="panel p-5">
           <h2 className="font-bold text-slate-950">Official Account & Credentials</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Create the login for the officer who works in a department. They will only see complaints assigned to that department.</p>
           <div className="mt-4 grid gap-3">
-            <Field label="Full name" value={staffForm.fullName} onChange={(value) => setStaffForm((form) => ({ ...form, fullName: value }))} />
-            <Field label="Email" value={staffForm.email} onChange={(value) => setStaffForm((form) => ({ ...form, email: value }))} />
-            <Field label="Phone" value={staffForm.phone} onChange={(value) => setStaffForm((form) => ({ ...form, phone: value }))} />
-            <Field label="Password" value={staffForm.password} onChange={(value) => setStaffForm((form) => ({ ...form, password: value }))} />
+            <Field label="Full name" value={staffForm.fullName} onChange={(value) => setStaffForm((form) => ({ ...form, fullName: value }))} placeholder="Example: Patrick Niyonsenga" required />
+            <Field label="Email" value={staffForm.email} onChange={(value) => setStaffForm((form) => ({ ...form, email: value }))} placeholder="officer@smartcitizen.rw" hint="This is the officer's login email." required />
+            <Field label="Phone" value={staffForm.phone} onChange={(value) => setStaffForm((form) => ({ ...form, phone: value }))} placeholder="+250 788 456 222" />
+            <Field label="Password" value={staffForm.password} onChange={(value) => setStaffForm((form) => ({ ...form, password: value }))} hint="Give this password to the officer. They can use it with the email above." required />
             <label>
               <span className="label">Complaint department</span>
               <select className="input" value={staffForm.officeId} onChange={(event) => setStaffForm((form) => ({ ...form, officeId: event.target.value }))}>
                 {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
               </select>
+              <p className="mt-1 text-xs text-slate-500">This controls which complaints the officer can see and respond to.</p>
             </label>
             <button className="btn-primary" disabled={busy === 'staff'}><KeyRound size={16} />{busy === 'staff' ? 'Creating...' : 'Create Staff Account'}</button>
           </div>
@@ -572,10 +612,11 @@ const Table = ({ headers, children }) => (
   </section>
 );
 
-const Field = ({ label, value, onChange, type = 'text' }) => (
+const Field = ({ label, value, onChange, type = 'text', placeholder = '', hint = '', required = false }) => (
   <label>
-    <span className="label">{label}</span>
-    <input className="input" type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    <span className="label">{label}{required && <span className="text-red-500"> *</span>}</span>
+    <input className="input" type={type} value={value} placeholder={placeholder} required={required} onChange={(event) => onChange(event.target.value)} />
+    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
   </label>
 );
 
