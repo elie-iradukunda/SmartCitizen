@@ -20,6 +20,9 @@ import {
   ComplaintOfficerDashboard,
   ComplaintTypeManagement,
   MyComplaints,
+  StaffClassifyAssign,
+  StaffEscalations,
+  StaffRespondUpdate,
   SubmitComplaint
 } from './pages/complaints/ComplaintPages.jsx';
 import { CitizenDashboard } from './pages/citizen/CitizenDashboard.jsx';
@@ -55,9 +58,9 @@ const App = () => (
       <Route path="dashboard" element={<ComplaintOfficerDashboard />} />
       <Route path="cases" element={<AssignedCases />} />
       <Route path="cases/:trackingNumber" element={<ComplaintDetails />} />
-      <Route path="all-cases" element={<AssignedCases />} />
-      <Route path="respond" element={<AssignedCases />} />
-      <Route path="escalations" element={<AssignedCases />} />
+      <Route path="all-cases" element={<StaffClassifyAssign />} />
+      <Route path="respond" element={<StaffRespondUpdate />} />
+      <Route path="escalations" element={<StaffEscalations />} />
       <Route path="reports" element={<AdminComplaintReports />} />
       <Route path="notifications" element={<ComplaintNotifications />} />
     </Route>

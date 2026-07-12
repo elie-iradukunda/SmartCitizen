@@ -54,7 +54,7 @@ export const complaintController = {
     res.status(201).json(await complaintService.createRoutingRule(req.body, req.user));
   }),
 
-  reports: asyncHandler(async (req, res) => res.json(await complaintService.reports())),
+  reports: asyncHandler(async (req, res) => res.json(await complaintService.reports(req.user))),
   notifications: asyncHandler(async (req, res) => res.json(await complaintService.notifications(req.user))),
   markRead: asyncHandler(async (req, res) => res.json(await complaintService.markNotificationRead(req.params.id, req.user))),
   unreadCount: asyncHandler(async (req, res) => res.json(await complaintService.unreadNotificationCount(req.user))),

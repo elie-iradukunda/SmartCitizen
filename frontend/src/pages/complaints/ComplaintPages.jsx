@@ -22,6 +22,13 @@ const defaultComplaint = {
 };
 
 const formatDate = (value) => (value ? new Date(value).toLocaleString() : 'Not set');
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const terminalStatuses = ['Resolved', 'Closed'];
+const activeStatuses = ['Assigned', 'In Review', 'Waiting for Citizen', 'Escalated'];
+const staffStatusOptions = ['Assigned', 'In Review', 'Waiting for Citizen', 'Resolved', 'Closed'];
+const priorityOptions = ['Low', 'Medium', 'High', 'Critical'];
+const isTerminal = (complaint) => terminalStatuses.includes(complaint.status);
+const isOverdue = (complaint) => !isTerminal(complaint) && complaint.dueDate && complaint.dueDate < todayIso();
 
 export const SubmitComplaint = () => {
   const { user } = useAuth();
@@ -445,7 +452,7 @@ export const AssignedCases = () => {
 
   return (
     <div>
-      <PageHeader title="Administrative Staff Cases" subtitle="Review complaints, classify and assign cases, respond or update citizens, and escalate unresolved matters." />
+      <PageHeader title="Assigned Cases" subtitle="Review complaints currently assigned to your responsible office and open the right workflow for follow-up." />
       <div className="space-y-4">
         {complaints.map((complaint) => (
           <article key={complaint.trackingNumber} className="card p-5">
@@ -487,6 +494,226 @@ export const AssignedCases = () => {
     </div>
   );
 };
+
+const staffWorkflowCopy = {
+  classify: {
+    title: 'Classify & Assign',
+    subtitle: 'Confirm priority, responsible office, and first review status before work continues.',
+    emptyText: 'No active cases are waiting for classification.',
+    panelTitle: 'Classification',
+    responsePlaceholder: 'Explain the classification or transfer decision.'
+  },
+  respond: {
+    title: 'Respond / Update',
+    subtitle: 'Send official responses, request information, and move cases through their status.',
+    emptyText: 'No active cases need a response right now.',
+    panelTitle: 'Response',
+    responsePlaceholder: 'Write the response the citizen should see.'
+  },
+  escalations: {
+    title: 'Escalations',
+    subtitle: 'Escalate overdue, critical, or unresolved cases for senior follow-up.',
+    emptyText: 'No overdue, critical, or escalated cases need action.',
+    panelTitle: 'Escalation action',
+    responsePlaceholder: 'Explain why this case needs senior follow-up.'
+  }
+};
+
+const staffCaseFilter = (mode, complaint) => {
+  if (mode === 'classify') return activeStatuses.includes(complaint.status) && complaint.status !== 'Escalated';
+  if (mode === 'respond') return activeStatuses.includes(complaint.status);
+  if (mode === 'escalations') return complaint.status === 'Escalated' || complaint.priority === 'Critical' || isOverdue(complaint);
+  return true;
+};
+
+const defaultStaffDraft = (complaint, mode) => ({
+  assignedOfficeId: complaint.assignedOfficeId || '',
+  priority: complaint.priority || 'Medium',
+  status: mode === 'escalations'
+    ? (complaint.status === 'Escalated' ? 'Escalated' : complaint.status)
+    : (complaint.status === 'Assigned' ? 'In Review' : complaint.status),
+  responseText: '',
+  escalatedTo: complaint.escalatedTo || 'Sector Executive Office',
+  escalationReason: ''
+});
+
+const defaultStaffResponse = (complaint, mode, draft) => {
+  if (mode === 'classify') return `Case classified as ${draft.priority || complaint.priority} priority and assigned for follow-up.`;
+  if (mode === 'escalations') return draft.escalationReason || 'Escalated because the case needs senior administrative follow-up.';
+  return 'Case reviewed by responsible office.';
+};
+
+const StaffCaseWorkflow = ({ mode }) => {
+  const copy = staffWorkflowCopy[mode];
+  const toast = useToast();
+  const [complaints, setComplaints] = useState([]);
+  const [meta, setMeta] = useState(null);
+  const [drafts, setDrafts] = useState({});
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    Promise.all([endpoints.complaints(), endpoints.complaintMeta()]).then(([complaintData, metaData]) => {
+      setComplaints(complaintData);
+      setMeta(metaData);
+    });
+  }, []);
+
+  const visibleComplaints = complaints.filter((complaint) => staffCaseFilter(mode, complaint));
+  const active = complaints.filter((complaint) => !isTerminal(complaint));
+  const overdue = complaints.filter(isOverdue);
+  const escalated = complaints.filter((complaint) => complaint.status === 'Escalated');
+  const draftFor = (complaint) => ({ ...defaultStaffDraft(complaint, mode), ...(drafts[complaint.trackingNumber] || {}) });
+
+  const updateDraft = (complaint, patch) => setDrafts((current) => ({
+    ...current,
+    [complaint.trackingNumber]: { ...defaultStaffDraft(complaint, mode), ...(current[complaint.trackingNumber] || {}), ...patch }
+  }));
+
+  const clearDraft = (trackingNumber) => setDrafts((current) => {
+    const next = { ...current };
+    delete next[trackingNumber];
+    return next;
+  });
+
+  const updateStatus = async (complaint) => {
+    const draft = draftFor(complaint);
+    const payload = {
+      status: draft.status,
+      priority: draft.priority || complaint.priority,
+      responseText: draft.responseText?.trim() || defaultStaffResponse(complaint, mode, draft)
+    };
+    if (draft.assignedOfficeId) payload.assignedOfficeId = Number(draft.assignedOfficeId);
+
+    setBusyId(complaint.trackingNumber);
+    try {
+      const updated = await endpoints.updateComplaintStatus(complaint.trackingNumber, payload);
+      setComplaints((items) => items.map((item) => (item.trackingNumber === complaint.trackingNumber ? updated : item)));
+      clearDraft(complaint.trackingNumber);
+      toast.success(`${complaint.trackingNumber} updated to ${updated.status}.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not update complaint'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const escalate = async (complaint) => {
+    const draft = draftFor(complaint);
+    setBusyId(complaint.trackingNumber);
+    try {
+      const updated = await endpoints.escalateComplaint(complaint.trackingNumber, {
+        escalatedTo: draft.escalatedTo || 'Sector Executive Office',
+        reason: draft.escalationReason?.trim() || draft.responseText?.trim() || defaultStaffResponse(complaint, 'escalations', draft)
+      });
+      setComplaints((items) => items.map((item) => (item.trackingNumber === complaint.trackingNumber ? updated : item)));
+      clearDraft(complaint.trackingNumber);
+      toast.success(`${complaint.trackingNumber} escalated.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not escalate complaint'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (!meta) return <LoadingState />;
+
+  return (
+    <div>
+      <PageHeader title={copy.title} subtitle={copy.subtitle} />
+      <div className="mb-5 grid gap-3 md:grid-cols-4">
+        <StaffStat label="Assigned to Office" value={complaints.length} color="bg-blue-600" />
+        <StaffStat label="Active" value={active.length} color="bg-amber-500" />
+        <StaffStat label="Escalated" value={escalated.length} color="bg-red-600" />
+        <StaffStat label="Overdue" value={overdue.length} color="bg-red-600" />
+      </div>
+
+      <div className="space-y-4">
+        {visibleComplaints.map((complaint) => {
+          const draft = draftFor(complaint);
+          const escalationMode = mode === 'escalations';
+          const showClassification = mode === 'classify';
+          const statusChoices = (escalationMode || complaint.status === 'Escalated') ? ['Escalated', 'In Review', 'Waiting for Citizen', 'Resolved', 'Closed'] : staffStatusOptions;
+
+          return (
+            <article key={complaint.trackingNumber} className="card p-5">
+              <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
+                <div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusBadge value={complaint.status} />
+                    <StatusBadge value={complaint.priority} />
+                    <StatusBadge value={complaint.type} />
+                    {isOverdue(complaint) && <StatusBadge value="Overdue" />}
+                  </div>
+                  <Link to={`/staff/cases/${complaint.trackingNumber}`} className="mt-3 block text-lg font-bold text-slate-950 hover:text-emerald-700">
+                    {complaint.trackingNumber}
+                  </Link>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{complaint.description}</p>
+                  <p className="mt-3 text-sm text-slate-500">{complaint.assignedOffice} - {complaint.assignedTo} - Due {complaint.dueDate}</p>
+                </div>
+
+                <div className="rounded-md border border-slate-200 p-3">
+                  <h2 className="text-sm font-bold text-slate-950">{copy.panelTitle}</h2>
+                  {showClassification && (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <label>
+                        <span className="label">Responsible office</span>
+                        <select className="input" value={draft.assignedOfficeId} onChange={(event) => updateDraft(complaint, { assignedOfficeId: event.target.value })}>
+                          {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+                        </select>
+                      </label>
+                      <label>
+                        <span className="label">Priority</span>
+                        <select className="input" value={draft.priority} onChange={(event) => updateDraft(complaint, { priority: event.target.value })}>
+                          {priorityOptions.map((priority) => <option key={priority}>{priority}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  )}
+
+                  <label className="mt-2 block">
+                    <span className="label">Status update</span>
+                    <select className="input" value={draft.status} onChange={(event) => updateDraft(complaint, { status: event.target.value })}>
+                      {statusChoices.map((status) => <option key={status}>{status}</option>)}
+                    </select>
+                  </label>
+
+                  {escalationMode && (
+                    <Field label="Escalate to" value={draft.escalatedTo} onChange={(value) => updateDraft(complaint, { escalatedTo: value })} />
+                  )}
+
+                  <textarea
+                    className="input mt-2 min-h-24"
+                    value={escalationMode ? draft.escalationReason : draft.responseText}
+                    onChange={(event) => updateDraft(complaint, escalationMode ? { escalationReason: event.target.value } : { responseText: event.target.value })}
+                    placeholder={copy.responsePlaceholder}
+                  />
+
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <button className="btn-primary" disabled={busyId === complaint.trackingNumber} onClick={() => updateStatus(complaint)}>
+                      <CheckCircle2 size={16} />
+                      Save
+                    </button>
+                    {!isTerminal(complaint) && (
+                      <button className="btn-secondary text-amber-700" disabled={busyId === complaint.trackingNumber} onClick={() => escalate(complaint)}>
+                        <AlertTriangle size={16} />
+                        Escalate
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+        {visibleComplaints.length === 0 && <p className="text-sm text-slate-500">{copy.emptyText}</p>}
+      </div>
+    </div>
+  );
+};
+
+export const StaffClassifyAssign = () => <StaffCaseWorkflow mode="classify" />;
+export const StaffRespondUpdate = () => <StaffCaseWorkflow mode="respond" />;
+export const StaffEscalations = () => <StaffCaseWorkflow mode="escalations" />;
 
 export const AdminComplaints = () => {
   const toast = useToast();

@@ -237,8 +237,7 @@ const notificationComplaintInclude = (actor) => {
   return { ...include, required: true, where: { officeId: actor.officeId ?? -1 } };
 };
 
-const statusCounts = async () => {
-  const rows = await Complaint.findAll({ attributes: ['status'] });
+const statusCounts = (rows) => {
   return Object.values(rows.reduce((acc, row) => {
     const status = row.status;
     acc[status] ||= { name: status, value: 0 };
@@ -368,11 +367,12 @@ export const complaintService = {
   async list(filters = {}, actor) {
     const where = {};
     if (filters.status) where.status = filters.status;
-    if (filters.officeId) where.officeId = filters.officeId;
-    if (actor?.role === 'staff' && actor.officeId && !filters.officeId) {
+    if (actor?.role === 'staff' && actor.officeId) {
       where.officeId = actor.officeId;
     } else if (actor?.role === 'staff' && !actor.officeId) {
       return [];
+    } else if (filters.officeId) {
+      where.officeId = filters.officeId;
     }
 
     const complaints = await Complaint.findAll({
@@ -569,13 +569,37 @@ export const complaintService = {
     };
   },
 
-  async reports() {
+  async reports(actor) {
+    const complaintWhere = {};
+    if (actor?.role === 'staff') {
+      if (!actor.officeId) {
+        return {
+          summary: {
+            totalComplaints: 0,
+            openComplaints: 0,
+            escalated: 0,
+            resolved: 0,
+            overdue: 0,
+            averageSatisfaction: 0
+          },
+          byStatus: [],
+          byCategory: [],
+          byOffice: [],
+          recentComplaints: [],
+          auditLogs: []
+        };
+      }
+      complaintWhere.officeId = actor.officeId;
+    }
+
     const complaints = await Complaint.findAll({
+      where: complaintWhere,
       include: includeComplaintRelations,
       order: [['createdAt', 'DESC']]
     });
     const active = complaints.filter((complaint) => !['Closed', 'Resolved'].includes(complaint.status));
-    const ratings = await SatisfactionRating.findAll();
+    const complaintIds = complaints.map((complaint) => complaint.id);
+    const ratings = complaintIds.length ? await SatisfactionRating.findAll({ where: { complaintId: complaintIds } }) : [];
     const averageSatisfaction = ratings.length ? ratings.reduce((sum, rating) => sum + Number(rating.score), 0) / ratings.length : 0;
 
     const categories = await ComplaintCategory.findAll({ where: { active: true }, order: [['id', 'ASC']] });
@@ -592,7 +616,9 @@ export const complaintService = {
       }))
       .filter((item) => item.value > 0);
 
-    const auditLogs = await AuditLog.findAll({ order: [['createdAt', 'DESC']], limit: 8 });
+    const auditLogs = actor?.role === 'staff'
+      ? []
+      : await AuditLog.findAll({ order: [['createdAt', 'DESC']], limit: 8 });
 
     return {
       summary: {
@@ -603,7 +629,7 @@ export const complaintService = {
         overdue: active.filter((complaint) => complaint.dueDate < today()).length,
         averageSatisfaction: Number(averageSatisfaction.toFixed(1))
       },
-      byStatus: await statusCounts(),
+      byStatus: statusCounts(complaints),
       byCategory,
       byOffice,
       recentComplaints: complaints.slice(0, 6).map(publicComplaint),
