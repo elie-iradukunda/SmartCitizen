@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Bell, LogOut, Menu, PlusCircle, X } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo.jsx';
+import { LanguageSwitcher } from '../components/LanguageSwitcher.jsx';
 import { sidebarLinks, roleHome } from '../data/navigation.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { endpoints } from '../api/client.js';
@@ -132,6 +133,7 @@ export const DashboardLayout = ({ role = 'citizen' }) => {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <LanguageSwitcher />
               <div className="relative" ref={notifRef}>
                 <button onClick={openNotifications} className="relative grid h-9 w-9 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" aria-label="Notifications">
                   <Bell size={17} />

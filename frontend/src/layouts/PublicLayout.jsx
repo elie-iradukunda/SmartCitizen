@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { BrandLogo } from '../components/BrandLogo.jsx';
+import { LanguageSwitcher } from '../components/LanguageSwitcher.jsx';
 import { publicLinks } from '../data/navigation.js';
 
 export const PublicLayout = () => (
@@ -20,6 +21,7 @@ export const PublicLayout = () => (
           ))}
         </nav>
         <div className="flex items-center gap-3">
+          <LanguageSwitcher />
           <button className="hidden h-9 w-9 place-items-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 sm:grid" aria-label="Search">
             <Search size={17} />
           </button>

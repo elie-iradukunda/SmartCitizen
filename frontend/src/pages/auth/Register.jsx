@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserPlus } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo.jsx';
+import { LanguageSwitcher } from '../../components/LanguageSwitcher.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast, errorMessage } from '../../context/ToastContext.jsx';
 
@@ -40,7 +41,10 @@ export const Register = () => {
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10">
       <div className="mx-auto max-w-4xl">
-        <div className="mb-6"><BrandLogo /></div>
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <BrandLogo />
+          <LanguageSwitcher />
+        </div>
         <form onSubmit={submit} className="panel p-6 sm:p-8">
           <h1 className="text-2xl font-bold text-slate-950">Create Citizen Account</h1>
           <p className="mt-1 text-sm text-slate-500">Register to submit complaints or feedback, track status, receive responses, and rate resolution.</p>

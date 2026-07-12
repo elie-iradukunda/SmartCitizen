@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogIn, ShieldCheck } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo.jsx';
+import { LanguageSwitcher } from '../../components/LanguageSwitcher.jsx';
 import { roleHome } from '../../data/navigation.js';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast, errorMessage } from '../../context/ToastContext.jsx';
@@ -57,6 +58,9 @@ export const Login = () => {
         </section>
         <section className="p-6 sm:p-8">
           <div className="lg:hidden"><BrandLogo /></div>
+          <div className="mb-4 flex justify-end">
+            <LanguageSwitcher />
+          </div>
           <h1 className="mt-8 text-2xl font-bold text-slate-950 lg:mt-0">Login</h1>
           <p className="mt-1 text-sm text-slate-500">Use demo password <span className="font-bold">password</span>.</p>
           <div className="mt-5 grid gap-2 sm:grid-cols-3">
