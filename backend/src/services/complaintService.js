@@ -14,30 +14,18 @@ import {
 const today = () => new Date().toISOString().slice(0, 10);
 const dueDateFromDays = (days) => new Date(Date.now() + Number(days || 3) * 86400000).toISOString().slice(0, 10);
 const categoryOrder = [
-  'service-delay',
-  'documents',
-  'infrastructure',
-  'water-sanitation',
-  'land-housing',
-  'health-hygiene',
-  'safety-community',
-  'market-trade',
-  'education-youth',
-  'misconduct',
-  'feedback'
+  'citizen-services',
+  'infrastructure-sanitation',
+  'land-housing-construction',
+  'community-safety-health',
+  'governance-accountability'
 ];
 const officeOrder = [
-  'service-delivery',
-  'responsible-service-unit',
-  'infrastructure-office',
-  'water-sanitation-unit',
-  'land-housing-office',
-  'health-social-affairs',
-  'safety-desk',
-  'trade-cooperatives-desk',
-  'education-youth-office',
-  'senior-administrator',
-  'customer-care-planning'
+  'citizen-services-office',
+  'infrastructure-sanitation-office',
+  'land-housing-construction-office',
+  'community-safety-health-office',
+  'governance-accountability-office'
 ];
 const sortByCodeOrder = (items, order) => [...items].sort((a, b) => {
   const first = order.indexOf(a.code);
