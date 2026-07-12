@@ -42,6 +42,18 @@ export const complaintController = {
     res.status(201).json(await complaintService.createCategory({ ...req.body, actor: req.user?.fullName }));
   }),
 
+  createOffice: asyncHandler(async (req, res) => {
+    res.status(201).json(await complaintService.createOffice(req.body, req.user));
+  }),
+
+  updateOffice: asyncHandler(async (req, res) => {
+    res.json(await complaintService.updateOffice(req.params.id, req.body, req.user));
+  }),
+
+  deleteOffice: asyncHandler(async (req, res) => {
+    res.json(await complaintService.deleteOffice(req.params.id, req.user));
+  }),
+
   updateCategory: asyncHandler(async (req, res) => {
     res.json(await complaintService.updateCategory(req.params.id, req.body, req.user));
   }),

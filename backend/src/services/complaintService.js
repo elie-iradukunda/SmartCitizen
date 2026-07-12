@@ -7,7 +7,8 @@ import {
   ComplaintResponse,
   Office,
   RoutingRule,
-  SatisfactionRating
+  SatisfactionRating,
+  User
 } from '../models/index.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -129,6 +130,22 @@ const publicOffice = (record) => {
     email: item.email,
     active: item.active
   };
+};
+
+const officeCodeFrom = (name) => String(name || 'office')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/(^-|-$)/g, '');
+
+const uniqueOfficeCode = async (name) => {
+  const base = officeCodeFrom(name);
+  let code = base;
+  let suffix = 2;
+  while (await Office.findOne({ where: { code } })) {
+    code = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return code;
 };
 
 const publicRule = (record) => {
@@ -308,6 +325,67 @@ export const complaintService = {
         .map(publicRule)
         .sort((a, b) => (categoryRank[a.categoryId] ?? 999) - (categoryRank[b.categoryId] ?? 999))
     };
+  },
+
+  async createOffice(payload, actor) {
+    if (!payload.name) {
+      const error = new Error('Department or office name is required');
+      error.status = 422;
+      throw error;
+    }
+
+    const office = await Office.create({
+      code: payload.code || await uniqueOfficeCode(payload.name),
+      name: payload.name,
+      contactPerson: payload.contactPerson || '',
+      phone: payload.phone || '',
+      email: payload.email || '',
+      active: payload.active === undefined ? true : Boolean(payload.active)
+    });
+    await logAction(actor?.fullName || 'Administrator', `Created responsible office ${office.name}`, { entity: 'office', entityId: office.id });
+    return publicOffice(office);
+  },
+
+  async updateOffice(id, payload, actor) {
+    const office = await Office.findByPk(id);
+    if (!office) {
+      const error = new Error('Responsible office not found');
+      error.status = 404;
+      throw error;
+    }
+
+    const updates = {};
+    ['name', 'contactPerson', 'phone', 'email'].forEach((field) => {
+      if (payload[field] !== undefined) updates[field] = payload[field];
+    });
+    if (payload.active !== undefined) updates.active = Boolean(payload.active);
+    await office.update(updates);
+    await logAction(actor?.fullName || 'Administrator', `Updated responsible office ${office.name}`, { entity: 'office', entityId: office.id });
+    return publicOffice(office);
+  },
+
+  async deleteOffice(id, actor) {
+    const office = await Office.findByPk(id);
+    if (!office) {
+      const error = new Error('Responsible office not found');
+      error.status = 404;
+      throw error;
+    }
+
+    const [linkedComplaints, linkedRules, linkedUsers] = await Promise.all([
+      Complaint.count({ where: { officeId: office.id } }),
+      RoutingRule.count({ where: { officeId: office.id } }),
+      User.count({ where: { officeId: office.id } })
+    ]);
+    if (linkedComplaints || linkedRules || linkedUsers) {
+      const error = new Error('This office is linked to complaints, routing rules, or staff accounts. Deactivate it after moving those responsibilities first.');
+      error.status = 422;
+      throw error;
+    }
+
+    await office.destroy();
+    await logAction(actor?.fullName || 'Administrator', `Deleted responsible office ${office.name}`, { entity: 'office', entityId: office.id });
+    return { deleted: true };
   },
 
   async createCategory(payload) {

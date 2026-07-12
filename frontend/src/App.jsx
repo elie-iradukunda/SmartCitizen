@@ -7,6 +7,7 @@ import { Register } from './pages/auth/Register.jsx';
 import {
   AdminAuditLogs,
   AdminDashboard,
+  AdminSetup,
   AdminSettings,
   AdminUsers
 } from './pages/admin/AdminPages.jsx';
@@ -68,6 +69,7 @@ const App = () => (
     <Route path="admin" element={<DashboardLayout role="admin" />}>
       <Route index element={<Navigate to="/admin/dashboard" replace />} />
       <Route path="dashboard" element={<AdminDashboard />} />
+      <Route path="setup" element={<AdminSetup />} />
       <Route path="complaints" element={<AdminComplaints />} />
       <Route path="complaints/:trackingNumber" element={<ComplaintDetails />} />
       <Route path="users" element={<AdminUsers />} />

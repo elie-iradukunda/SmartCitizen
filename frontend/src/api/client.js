@@ -65,6 +65,9 @@ export const endpoints = {
   createComplaintCategory: (payload) => unwrap(api.post('/complaints/categories', payload)),
   updateComplaintCategory: (id, payload) => unwrap(api.patch(`/complaints/categories/${id}`, payload)),
   deleteComplaintCategory: (id) => unwrap(api.delete(`/complaints/categories/${id}`)),
+  createOffice: (payload) => unwrap(api.post('/complaints/offices', payload)),
+  updateOffice: (id, payload) => unwrap(api.patch(`/complaints/offices/${id}`, payload)),
+  deleteOffice: (id) => unwrap(api.delete(`/complaints/offices/${id}`)),
   readNotification: (id) => unwrap(api.patch(`/complaints/notifications/${id}/read`)),
   unreadNotificationCount: () => unwrap(api.get('/complaints/notifications/unread-count')),
 

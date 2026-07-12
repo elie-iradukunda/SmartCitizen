@@ -42,6 +42,7 @@ export const sidebarLinks = {
   ],
   admin: [
     { label: 'Dashboard', to: '/admin/dashboard', icon: Gauge },
+    { label: 'Complaint Setup', to: '/admin/setup', icon: CheckSquare },
     { label: 'Complaint Register', to: '/admin/complaints', icon: Inbox },
     { label: 'Users & Roles', to: '/admin/users', icon: Users },
     { label: 'Categories & SLA', to: '/admin/categories', icon: Tags },

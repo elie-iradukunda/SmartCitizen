@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart3, FileText, PlusCircle, Settings, Trash2, Users } from 'lucide-react';
+import { BarChart3, ClipboardList, FileText, KeyRound, PlusCircle, Settings, Trash2, Users } from 'lucide-react';
 import { endpoints } from '../../api/client.js';
 import { LoadingState } from '../../components/LoadingState.jsx';
 import { PageHeader } from '../../components/PageHeader.jsx';
@@ -86,7 +86,7 @@ export const AdminDashboard = () => {
           <section className="rounded-lg border border-slate-200 p-4">
             <h2 className="text-sm font-bold text-slate-950">Reports & Analytics</h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-4">
-              <ReportLink to="/admin/reports" label="Complaint Performance" />
+              <ReportLink to="/admin/setup" label="Complaint Setup" />
               <ReportLink to="/admin/reports" label="Office Performance" />
               <ReportLink to="/admin/categories" label="SLA Compliance" />
               <ReportLink to="/admin/reports" label="Citizen Satisfaction" />
@@ -99,6 +99,275 @@ export const AdminDashboard = () => {
 };
 
 const emptyUser = { fullName: '', email: '', phone: '', password: '', role: 'citizen', district: '', officeId: '' };
+const emptyOffice = { name: '', contactPerson: '', phone: '', email: '' };
+const emptySetupCategory = { name: '', description: '', defaultPriority: 'Medium', slaDays: 3, officeId: '', location: 'Kacyiru' };
+const emptyStaffAccount = { fullName: '', email: '', phone: '', password: 'password', officeId: '' };
+const priorities = ['Low', 'Medium', 'High', 'Critical'];
+
+export const AdminSetup = () => {
+  const toast = useToast();
+  const [meta, setMeta] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [officeForm, setOfficeForm] = useState(emptyOffice);
+  const [categoryForm, setCategoryForm] = useState(emptySetupCategory);
+  const [staffForm, setStaffForm] = useState(emptyStaffAccount);
+  const [credentials, setCredentials] = useState([]);
+  const [busy, setBusy] = useState('');
+
+  const load = async () => {
+    const [metaData, userData] = await Promise.all([endpoints.complaintMeta(), endpoints.users()]);
+    setMeta(metaData);
+    setUsers(userData);
+    const firstOffice = metaData.offices[0]?.id || '';
+    setCategoryForm((current) => ({ ...current, officeId: current.officeId || firstOffice }));
+    setStaffForm((current) => ({ ...current, officeId: current.officeId || firstOffice }));
+  };
+
+  useEffect(() => { load().catch((err) => toast.error(errorMessage(err, 'Could not load setup data'))); }, []);
+
+  if (!meta) return <LoadingState />;
+
+  const officeName = (officeId) => meta.offices.find((office) => Number(office.id) === Number(officeId))?.name || 'No office selected';
+  const staffForOffice = (officeId) => users.filter((user) => user.role === 'staff' && Number(user.officeId) === Number(officeId));
+  const rulesForOffice = (officeId) => meta.routingRules.filter((rule) => Number(rule.officeId) === Number(officeId));
+  const ruleForCategory = (categoryId) => meta.routingRules.find((rule) => Number(rule.categoryId) === Number(categoryId));
+
+  const createOffice = async (event) => {
+    event.preventDefault();
+    setBusy('office');
+    try {
+      const office = await endpoints.createOffice(officeForm);
+      setMeta((current) => ({ ...current, offices: [...current.offices, office] }));
+      setCategoryForm((current) => ({ ...current, officeId: current.officeId || office.id }));
+      setStaffForm((current) => ({ ...current, officeId: current.officeId || office.id }));
+      setOfficeForm(emptyOffice);
+      toast.success(`${office.name} department was added.`);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not create office'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const createCategoryAndRoute = async (event) => {
+    event.preventDefault();
+    if (!categoryForm.officeId) {
+      toast.error('Choose a responsible department first.');
+      return;
+    }
+    setBusy('category');
+    try {
+      const category = await endpoints.createComplaintCategory({
+        name: categoryForm.name,
+        description: categoryForm.description,
+        defaultPriority: categoryForm.defaultPriority,
+        slaDays: Number(categoryForm.slaDays || 3)
+      });
+      const result = await endpoints.createRoutingRule({
+        categoryId: category.id,
+        officeId: Number(categoryForm.officeId),
+        location: categoryForm.location || 'Kacyiru',
+        priority: categoryForm.defaultPriority,
+        slaDays: Number(categoryForm.slaDays || 3)
+      });
+      setMeta((current) => ({
+        ...current,
+        categories: [...current.categories, category],
+        routingRules: result.routingRules
+      }));
+      toast.success(`${category.name} now routes to ${officeName(categoryForm.officeId)}.`);
+      setCategoryForm({ ...emptySetupCategory, officeId: categoryForm.officeId });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not create category'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const createStaffAccount = async (event) => {
+    event.preventDefault();
+    if (!staffForm.officeId) {
+      toast.error('Choose the department this official manages.');
+      return;
+    }
+    setBusy('staff');
+    try {
+      const created = await endpoints.createUser({
+        ...staffForm,
+        role: 'staff',
+        officeId: Number(staffForm.officeId),
+        province: 'Kigali City',
+        district: 'Gasabo',
+        sector: 'Kacyiru',
+        status: 'active'
+      });
+      setUsers((items) => [created, ...items]);
+      setCredentials((items) => [{
+        fullName: created.fullName,
+        email: created.email,
+        password: staffForm.password,
+        office: officeName(staffForm.officeId)
+      }, ...items]);
+      toast.success(`${created.fullName} can now manage ${officeName(staffForm.officeId)} complaints.`);
+      setStaffForm({ ...emptyStaffAccount, officeId: staffForm.officeId });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not create user'));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  return (
+    <AdminListPage title="Complaint Setup" subtitle="Configure departments, complaint categories, routing responsibilities, and official accounts from one place." icon={ClipboardList}>
+      <div className="grid gap-4 xl:grid-cols-3">
+        <SetupStep number="1" title="Create Department" text="Add the office responsible for solving a group of complaints." />
+        <SetupStep number="2" title="Add Category & Route" text="Create a complaint type and immediately assign it to a department." />
+        <SetupStep number="3" title="Create Official Account" text="Give each officer credentials and link them to one department." />
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-3">
+        <form onSubmit={createOffice} className="panel p-5">
+          <h2 className="font-bold text-slate-950">Department / Office</h2>
+          <div className="mt-4 grid gap-3">
+            <Field label="Department name" value={officeForm.name} onChange={(value) => setOfficeForm((form) => ({ ...form, name: value }))} />
+            <Field label="Lead officer" value={officeForm.contactPerson} onChange={(value) => setOfficeForm((form) => ({ ...form, contactPerson: value }))} />
+            <Field label="Phone" value={officeForm.phone} onChange={(value) => setOfficeForm((form) => ({ ...form, phone: value }))} />
+            <Field label="Email" value={officeForm.email} onChange={(value) => setOfficeForm((form) => ({ ...form, email: value }))} />
+            <button className="btn-primary" disabled={busy === 'office'}><PlusCircle size={16} />{busy === 'office' ? 'Adding...' : 'Add Department'}</button>
+          </div>
+        </form>
+
+        <form onSubmit={createCategoryAndRoute} className="panel p-5">
+          <h2 className="font-bold text-slate-950">Complaint Category & Responsibility</h2>
+          <div className="mt-4 grid gap-3">
+            <Field label="Complaint category" value={categoryForm.name} onChange={(value) => setCategoryForm((form) => ({ ...form, name: value }))} />
+            <Field label="Description" value={categoryForm.description} onChange={(value) => setCategoryForm((form) => ({ ...form, description: value }))} />
+            <label>
+              <span className="label">Responsible department</span>
+              <select className="input" value={categoryForm.officeId} onChange={(event) => setCategoryForm((form) => ({ ...form, officeId: event.target.value }))}>
+                {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+              </select>
+            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label>
+                <span className="label">Priority</span>
+                <select className="input" value={categoryForm.defaultPriority} onChange={(event) => setCategoryForm((form) => ({ ...form, defaultPriority: event.target.value }))}>
+                  {priorities.map((priority) => <option key={priority}>{priority}</option>)}
+                </select>
+              </label>
+              <Field label="SLA days" type="number" value={categoryForm.slaDays} onChange={(value) => setCategoryForm((form) => ({ ...form, slaDays: Number(value) }))} />
+            </div>
+            <button className="btn-primary" disabled={busy === 'category'}><PlusCircle size={16} />{busy === 'category' ? 'Adding...' : 'Add Category & Route'}</button>
+          </div>
+        </form>
+
+        <form onSubmit={createStaffAccount} className="panel p-5">
+          <h2 className="font-bold text-slate-950">Official Account & Credentials</h2>
+          <div className="mt-4 grid gap-3">
+            <Field label="Full name" value={staffForm.fullName} onChange={(value) => setStaffForm((form) => ({ ...form, fullName: value }))} />
+            <Field label="Email" value={staffForm.email} onChange={(value) => setStaffForm((form) => ({ ...form, email: value }))} />
+            <Field label="Phone" value={staffForm.phone} onChange={(value) => setStaffForm((form) => ({ ...form, phone: value }))} />
+            <Field label="Password" value={staffForm.password} onChange={(value) => setStaffForm((form) => ({ ...form, password: value }))} />
+            <label>
+              <span className="label">Complaint department</span>
+              <select className="input" value={staffForm.officeId} onChange={(event) => setStaffForm((form) => ({ ...form, officeId: event.target.value }))}>
+                {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+              </select>
+            </label>
+            <button className="btn-primary" disabled={busy === 'staff'}><KeyRound size={16} />{busy === 'staff' ? 'Creating...' : 'Create Staff Account'}</button>
+          </div>
+        </form>
+      </div>
+
+      {credentials.length > 0 && (
+        <section className="panel mt-6 p-5">
+          <h2 className="font-bold text-slate-950">New Credentials To Give Officials</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {credentials.map((credential) => (
+              <div key={credential.email} className="rounded-md border border-slate-200 p-3">
+                <p className="font-bold text-slate-900">{credential.fullName}</p>
+                <p className="mt-1 text-sm text-slate-600">{credential.office}</p>
+                <p className="mt-2 text-xs font-semibold text-slate-500">Email: {credential.email}</p>
+                <p className="text-xs font-semibold text-slate-500">Password: {credential.password}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="panel mt-6 overflow-x-auto">
+        <div className="px-5 pt-5">
+          <h2 className="font-bold text-slate-950">Responsibility Map</h2>
+          <p className="mt-1 text-sm text-slate-500">Each category routes to one department. Staff in that department see and respond to those complaints.</p>
+        </div>
+        <table className="mt-4 w-full min-w-[980px] text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <tr><th className="px-4 py-3">Complaint Category</th><th className="px-4 py-3">Responsible Department</th><th className="px-4 py-3">Assigned Officials</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">SLA</th></tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {meta.categories.map((category) => {
+              const rule = ruleForCategory(category.id);
+              const officials = staffForOffice(rule?.officeId);
+              return (
+                <tr key={category.id}>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{category.name}</td>
+                  <td className="px-4 py-3 text-slate-600">{officeName(rule?.officeId)}</td>
+                  <td className="px-4 py-3 text-slate-500">{officials.map((official) => `${official.fullName} (${official.email})`).join(', ') || 'No official account yet'}</td>
+                  <td className="px-4 py-3"><StatusBadge value={rule?.priority || category.defaultPriority} /></td>
+                  <td className="px-4 py-3 text-slate-500">{rule?.slaDays || category.slaDays} days</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-2">
+        <div className="panel overflow-x-auto">
+          <div className="px-5 pt-5">
+            <h2 className="font-bold text-slate-950">Departments</h2>
+          </div>
+          <table className="mt-4 w-full min-w-[700px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr><th className="px-4 py-3">Department</th><th className="px-4 py-3">Lead</th><th className="px-4 py-3">Categories</th><th className="px-4 py-3">Staff</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {meta.offices.map((office) => (
+                <tr key={office.id}>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{office.name}</td>
+                  <td className="px-4 py-3 text-slate-500">{office.contactPerson || 'Not assigned'}</td>
+                  <td className="px-4 py-3 text-slate-500">{rulesForOffice(office.id).length}</td>
+                  <td className="px-4 py-3 text-slate-500">{staffForOffice(office.id).length}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="panel overflow-x-auto">
+          <div className="px-5 pt-5">
+            <h2 className="font-bold text-slate-950">Official Accounts</h2>
+          </div>
+          <table className="mt-4 w-full min-w-[760px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr><th className="px-4 py-3">Official</th><th className="px-4 py-3">Login Email</th><th className="px-4 py-3">Department</th><th className="px-4 py-3">Status</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {users.filter((user) => user.role === 'staff').map((staff) => (
+                <tr key={staff.id}>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{staff.fullName}</td>
+                  <td className="px-4 py-3 text-slate-500">{staff.email}</td>
+                  <td className="px-4 py-3 text-slate-500">{officeName(staff.officeId)}</td>
+                  <td className="px-4 py-3"><StatusBadge value={staff.status || 'active'} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </AdminListPage>
+  );
+};
 
 export const AdminUsers = () => {
   const toast = useToast();
