@@ -70,6 +70,7 @@ const publicComplaint = (record) => {
     evidenceType: item.evidenceType,
     attachmentName: item.attachmentName,
     attachmentPath: item.attachmentPath,
+    evidenceLink: item.evidenceLink,
     voiceNoteName: item.voiceNoteName,
     voiceNotePath: item.voiceNotePath,
     voiceNoteType: item.voiceNoteType,
@@ -591,7 +592,9 @@ export const complaintService = {
       ? 'Voice complaint recorded by citizen.'
       : attachmentFile
         ? 'Evidence submitted by citizen.'
-        : '';
+        : payload.evidenceLink?.trim()
+          ? 'Evidence link submitted by citizen.'
+          : '';
 
     const complaint = await Complaint.create({
       trackingNumber,
@@ -612,6 +615,7 @@ export const complaintService = {
       evidenceType: evidenceTypeFromFile(attachmentFile),
       attachmentName: attachmentFile?.originalname || payload.attachmentName || '',
       attachmentPath: attachmentFile ? `/uploads/${attachmentFile.filename}` : '',
+      evidenceLink: payload.evidenceLink?.trim() || '',
       voiceNoteName: voiceNoteFile?.originalname || '',
       voiceNotePath: voiceNoteFile ? `/uploads/${voiceNoteFile.filename}` : '',
       voiceNoteType: evidenceTypeFromFile(voiceNoteFile),

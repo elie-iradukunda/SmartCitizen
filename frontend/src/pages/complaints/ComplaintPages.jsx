@@ -15,6 +15,7 @@ const defaultComplaint = {
   type: '',
   description: '',
   citizenPhone: '',
+  evidenceLink: '',
   ...kacyiruDefaults
 };
 
@@ -26,6 +27,12 @@ const staffStatusOptions = ['Assigned', 'In Review', 'Waiting for Citizen', 'Res
 const priorityOptions = ['Low', 'Medium', 'High', 'Critical'];
 const isTerminal = (complaint) => terminalStatuses.includes(complaint.status);
 const isOverdue = (complaint) => !isTerminal(complaint) && complaint.dueDate && complaint.dueDate < todayIso();
+const maxEvidenceBytes = 100 * 1024 * 1024;
+const formatFileSize = (bytes = 0) => {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+};
 const audioExtensionFromMime = (mime = '') => {
   if (mime.includes('mp4')) return 'm4a';
   if (mime.includes('ogg')) return 'ogg';
@@ -138,14 +145,29 @@ export const SubmitComplaint = () => {
     }
   };
 
+  const handleEvidenceFile = (event) => {
+    const selected = event.target.files?.[0] || null;
+    if (selected && selected.size > maxEvidenceBytes) {
+      event.target.value = '';
+      setFile(null);
+      toast.error(`This file is ${formatFileSize(selected.size)}. Upload maximum is 100 MB. Paste a public video/evidence link instead.`);
+      return;
+    }
+    setFile(selected);
+  };
+
   const submit = async (event) => {
     event.preventDefault();
     if (recording) {
       toast.error('Stop the voice recording before submitting.');
       return;
     }
-    if (!form.description.trim() && !voiceNote && !file) {
-      toast.error('Type a description, record a voice complaint, or upload evidence.');
+    if (file && file.size > maxEvidenceBytes) {
+      toast.error('Upload maximum is 100 MB. Paste a public video/evidence link instead.');
+      return;
+    }
+    if (!form.description.trim() && !form.evidenceLink.trim() && !voiceNote && !file) {
+      toast.error('Type a description, record a voice complaint, upload evidence, or paste an evidence link.');
       return;
     }
     setSaving(true);
@@ -161,8 +183,12 @@ export const SubmitComplaint = () => {
             ? 'Video Evidence'
             : hasAudioEvidence
               ? 'Audio Evidence'
-              : file
+              : file && form.evidenceLink.trim()
+                ? 'Evidence Upload + Link'
+                : file
                 ? 'Evidence Upload'
+                : form.evidenceLink.trim()
+                  ? 'Evidence Link'
                 : 'Typed form';
       const channel = voiceNote ? 'Voice Recording' : 'Web Portal';
       const payload = { ...form, location, submissionMode, channel };
@@ -211,7 +237,7 @@ export const SubmitComplaint = () => {
             </label>
             <label>
               <span className="label">Description</span>
-              <textarea className="input min-h-36" value={form.description} onChange={(event) => update('description', event.target.value)} placeholder="Explain what happened, when it happened, and what help you expect." required={!voiceNote && !file} />
+              <textarea className="input min-h-36" value={form.description} onChange={(event) => update('description', event.target.value)} placeholder="Explain what happened, when it happened, and what help you expect." required={!voiceNote && !file && !form.evidenceLink.trim()} />
             </label>
             <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="rounded-md border border-dashed border-slate-300 bg-white p-3">
@@ -268,15 +294,26 @@ export const SubmitComplaint = () => {
                 className="input"
                 type="file"
                 accept="image/*,video/*,audio/*,.pdf"
-                onChange={(event) => setFile(event.target.files?.[0] || null)}
+                onChange={handleEvidenceFile}
               />
               {file && (
                 <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
                   <UploadCloud size={13} />
-                  {file.name} {file.type?.startsWith('video/') ? '(video evidence)' : file.type?.startsWith('audio/') ? '(audio evidence)' : ''}
+                  {file.name} - {formatFileSize(file.size)} {file.type?.startsWith('video/') ? '(video evidence)' : file.type?.startsWith('audio/') ? '(audio evidence)' : ''}
                 </p>
               )}
-              <p className="mt-1 text-xs text-slate-500">Upload a video, audio file, image, or PDF as evidence. This can be submitted together with the voice recording.</p>
+              <p className="mt-1 text-xs text-slate-500">Maximum upload size is 100 MB. For larger videos, paste a public evidence link below.</p>
+            </label>
+            <label>
+              <span className="label">Public evidence link (optional)</span>
+              <input
+                className="input"
+                type="url"
+                value={form.evidenceLink}
+                onChange={(event) => update('evidenceLink', event.target.value)}
+                placeholder="https://drive.google.com/... or https://youtube.com/..."
+              />
+              <p className="mt-1 text-xs text-slate-500">Use this for videos larger than 100 MB. Make sure the link is public or shared with permission.</p>
             </label>
           </div>
           <div className="mt-6 flex justify-end">
@@ -450,6 +487,14 @@ export const ComplaintDetails = () => {
             </div>
           ) : (
             <Info label="Attachment" value="No attachment" />
+          )}
+          {complaint.evidenceLink && (
+            <div className="mt-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Public Evidence Link</p>
+              <a href={complaint.evidenceLink} target="_blank" rel="noreferrer" className="mt-1 block break-all text-sm font-semibold text-brand-600 hover:underline">
+                {complaint.evidenceLink}
+              </a>
+            </div>
           )}
           {complaint.satisfaction && <Info label="Citizen Rating" value={`${complaint.satisfaction.score}/5 - ${complaint.satisfaction.comment}`} />}
         </aside>

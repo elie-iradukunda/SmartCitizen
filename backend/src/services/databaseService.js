@@ -29,6 +29,7 @@ const ensureSchemaColumns = async () => {
     [User, 'preferredLanguage'],
     [Complaint, 'submissionMode'],
     [Complaint, 'evidenceType'],
+    [Complaint, 'evidenceLink'],
     [Complaint, 'voiceNoteName'],
     [Complaint, 'voiceNotePath'],
     [Complaint, 'voiceNoteType']
