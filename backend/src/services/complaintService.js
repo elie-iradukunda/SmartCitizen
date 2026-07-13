@@ -633,15 +633,22 @@ export const complaintService = {
     const complaint = await loadComplaint(trackingNumber);
     if (actor) assertVisibleToActor(complaint, actor);
     const status = payload.status || complaint.status;
-    const officeChanged = Boolean(payload.assignedOfficeId) && Number(payload.assignedOfficeId) !== complaint.officeId;
+    const requestedOfficeId = payload.assignedOfficeId ? Number(payload.assignedOfficeId) : null;
+    if (actor?.role === 'staff' && requestedOfficeId && requestedOfficeId !== complaint.officeId) {
+      const error = new Error('Staff can only update complaints assigned to their department.');
+      error.status = 403;
+      throw error;
+    }
+    const canReassignOffice = actor?.role === 'admin' && requestedOfficeId;
+    const officeChanged = Boolean(canReassignOffice) && requestedOfficeId !== complaint.officeId;
     const updates = {
       status,
       priority: payload.priority || complaint.priority
     };
 
     let newOffice = null;
-    if (payload.assignedOfficeId) {
-      newOffice = await Office.findByPk(payload.assignedOfficeId);
+    if (canReassignOffice) {
+      newOffice = await Office.findByPk(requestedOfficeId);
       if (!newOffice) {
         const error = new Error('Office not found');
         error.status = 422;

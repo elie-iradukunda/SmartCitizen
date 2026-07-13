@@ -34,7 +34,7 @@ export const sidebarLinks = {
   staff: [
     { label: 'Dashboard', to: '/staff/dashboard', icon: Gauge },
     { label: 'Assigned Cases', to: '/staff/cases', icon: ListChecks },
-    { label: 'Classify & Assign', to: '/staff/all-cases', icon: CheckSquare },
+    { label: 'Review & Prioritize', to: '/staff/all-cases', icon: CheckSquare },
     { label: 'Respond / Update', to: '/staff/respond', icon: MessageSquare },
     { label: 'Escalations', to: '/staff/escalations', icon: ShieldCheck },
     { label: 'Reports', to: '/staff/reports', icon: BarChart3 },

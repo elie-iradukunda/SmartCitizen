@@ -666,14 +666,10 @@ export const ComplaintOfficerDashboard = () => {
 export const AssignedCases = () => {
   const toast = useToast();
   const [complaints, setComplaints] = useState([]);
-  const [meta, setMeta] = useState(null);
   const [drafts, setDrafts] = useState({});
   const [busyId, setBusyId] = useState(null);
   useEffect(() => {
-    Promise.all([endpoints.complaints(), endpoints.complaintMeta()]).then(([complaintData, metaData]) => {
-      setComplaints(complaintData);
-      setMeta(metaData);
-    });
+    endpoints.complaints().then(setComplaints);
   }, []);
 
   const updateDraft = (trackingNumber, patch) => setDrafts((current) => ({
@@ -682,7 +678,9 @@ export const AssignedCases = () => {
   }));
 
   const updateStatus = async (trackingNumber) => {
-    const payload = drafts[trackingNumber] || { status: 'In Review', responseText: 'Case reviewed by responsible office.' };
+    const draft = drafts[trackingNumber] || { status: 'In Review', responseText: 'Case reviewed by responsible office.' };
+    const payload = { ...draft };
+    delete payload.assignedOfficeId;
     setBusyId(trackingNumber);
     try {
       const updated = await endpoints.updateComplaintStatus(trackingNumber, payload);
@@ -721,18 +719,18 @@ export const AssignedCases = () => {
                   <StatusBadge value={complaint.priority} />
                   <StatusBadge value={complaint.type} />
                 </div>
-                <h2 className="mt-3 text-lg font-bold text-slate-950">{complaint.trackingNumber}</h2>
+                <Link to={`/staff/cases/${complaint.trackingNumber}`} className="mt-3 block text-lg font-bold text-slate-950 hover:text-emerald-700">
+                  {complaint.trackingNumber}
+                </Link>
                 <p className="mt-2 text-sm leading-6 text-slate-600">{complaint.description}</p>
+                <Link to={`/staff/cases/${complaint.trackingNumber}`} className="btn-secondary mt-4 inline-flex">
+                  <FileText size={16} />
+                  View full details
+                </Link>
                 <p className="mt-3 text-sm text-slate-500">{complaint.assignedOffice} · {complaint.assignedTo} · Due {complaint.dueDate}</p>
               </div>
               <div className="rounded-md border border-slate-200 p-3">
-                <label>
-                  <span className="label">Responsible office</span>
-                  <select className="input" value={drafts[complaint.trackingNumber]?.assignedOfficeId || complaint.assignedOfficeId || ''} onChange={(event) => updateDraft(complaint.trackingNumber, { assignedOfficeId: event.target.value })}>
-                    {meta?.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-                  </select>
-                </label>
-                <label className="mt-2 block">
+                <label className="block">
                   <span className="label">Status update</span>
                   <select className="input" value={drafts[complaint.trackingNumber]?.status || complaint.status} onChange={(event) => updateDraft(complaint.trackingNumber, { status: event.target.value })}>
                     {['In Review', 'Waiting for Citizen', 'Resolved', 'Closed'].map((status) => <option key={status}>{status}</option>)}
@@ -755,11 +753,11 @@ export const AssignedCases = () => {
 
 const staffWorkflowCopy = {
   classify: {
-    title: 'Classify & Assign',
-    subtitle: 'Confirm priority, responsible office, and first review status before work continues.',
+    title: 'Review & Prioritize',
+    subtitle: 'Review department cases, confirm priority, and update the first response status.',
     emptyText: 'No active cases are waiting for classification.',
-    panelTitle: 'Classification',
-    responsePlaceholder: 'Explain the classification or transfer decision.'
+    panelTitle: 'Case review',
+    responsePlaceholder: 'Explain the review or priority decision.'
   },
   respond: {
     title: 'Respond / Update',
@@ -785,7 +783,6 @@ const staffCaseFilter = (mode, complaint) => {
 };
 
 const defaultStaffDraft = (complaint, mode) => ({
-  assignedOfficeId: complaint.assignedOfficeId || '',
   priority: complaint.priority || 'Medium',
   status: mode === 'escalations'
     ? (complaint.status === 'Escalated' ? 'Escalated' : complaint.status)
@@ -796,7 +793,7 @@ const defaultStaffDraft = (complaint, mode) => ({
 });
 
 const defaultStaffResponse = (complaint, mode, draft) => {
-  if (mode === 'classify') return `Case classified as ${draft.priority || complaint.priority} priority and assigned for follow-up.`;
+  if (mode === 'classify') return `Case reviewed as ${draft.priority || complaint.priority} priority for department follow-up.`;
   if (mode === 'escalations') return draft.escalationReason || 'Escalated because the case needs senior administrative follow-up.';
   return 'Case reviewed by responsible office.';
 };
@@ -805,15 +802,14 @@ const StaffCaseWorkflow = ({ mode }) => {
   const copy = staffWorkflowCopy[mode];
   const toast = useToast();
   const [complaints, setComplaints] = useState([]);
-  const [meta, setMeta] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState({});
   const [busyId, setBusyId] = useState(null);
 
   useEffect(() => {
-    Promise.all([endpoints.complaints(), endpoints.complaintMeta()]).then(([complaintData, metaData]) => {
-      setComplaints(complaintData);
-      setMeta(metaData);
-    });
+    endpoints.complaints()
+      .then(setComplaints)
+      .finally(() => setLoading(false));
   }, []);
 
   const visibleComplaints = complaints.filter((complaint) => staffCaseFilter(mode, complaint));
@@ -840,7 +836,6 @@ const StaffCaseWorkflow = ({ mode }) => {
       priority: draft.priority || complaint.priority,
       responseText: draft.responseText?.trim() || defaultStaffResponse(complaint, mode, draft)
     };
-    if (draft.assignedOfficeId) payload.assignedOfficeId = Number(draft.assignedOfficeId);
 
     setBusyId(complaint.trackingNumber);
     try {
@@ -873,7 +868,7 @@ const StaffCaseWorkflow = ({ mode }) => {
     }
   };
 
-  if (!meta) return <LoadingState />;
+  if (loading) return <LoadingState />;
 
   return (
     <div>
@@ -907,18 +902,16 @@ const StaffCaseWorkflow = ({ mode }) => {
                   </Link>
                   <p className="mt-2 text-sm leading-6 text-slate-600">{complaint.description}</p>
                   <p className="mt-3 text-sm text-slate-500">{complaint.assignedOffice} - {complaint.assignedTo} - Due {complaint.dueDate}</p>
+                  <Link to={`/staff/cases/${complaint.trackingNumber}`} className="btn-secondary mt-4 inline-flex">
+                    <FileText size={16} />
+                    View full details
+                  </Link>
                 </div>
 
                 <div className="rounded-md border border-slate-200 p-3">
                   <h2 className="text-sm font-bold text-slate-950">{copy.panelTitle}</h2>
                   {showClassification && (
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <label>
-                        <span className="label">Responsible office</span>
-                        <select className="input" value={draft.assignedOfficeId} onChange={(event) => updateDraft(complaint, { assignedOfficeId: event.target.value })}>
-                          {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-                        </select>
-                      </label>
+                    <div className="mt-3">
                       <label>
                         <span className="label">Priority</span>
                         <select className="input" value={draft.priority} onChange={(event) => updateDraft(complaint, { priority: event.target.value })}>
