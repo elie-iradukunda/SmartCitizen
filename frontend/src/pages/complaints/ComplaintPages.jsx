@@ -60,6 +60,7 @@ export const SubmitComplaint = () => {
   const [meta, setMeta] = useState(null);
   const [saving, setSaving] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [voiceNote, setVoiceNote] = useState(null);
   const [voiceNoteUrl, setVoiceNoteUrl] = useState('');
   const mediaRecorderRef = useRef(null);
@@ -147,6 +148,7 @@ export const SubmitComplaint = () => {
 
   const handleEvidenceFile = (event) => {
     const selected = event.target.files?.[0] || null;
+    setUploadProgress(null);
     if (selected && selected.size > maxEvidenceBytes) {
       event.target.value = '';
       setFile(null);
@@ -154,6 +156,13 @@ export const SubmitComplaint = () => {
       return;
     }
     setFile(selected);
+  };
+
+  const updateUploadProgress = (event, estimatedTotal) => {
+    const total = event.total || estimatedTotal || 0;
+    const loaded = event.loaded || 0;
+    const percent = total ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
+    setUploadProgress({ loaded, total, percent });
   };
 
   const submit = async (event) => {
@@ -194,6 +203,8 @@ export const SubmitComplaint = () => {
       const payload = { ...form, location, submissionMode, channel };
       let complaint;
       if (file || voiceNote) {
+        const estimatedUploadSize = (file?.size || 0) + (voiceNote?.size || 0);
+        setUploadProgress({ loaded: 0, total: estimatedUploadSize, percent: 0 });
         const formData = new FormData();
         Object.entries(payload).forEach(([key, value]) => formData.append(key, value));
         if (file) formData.append('attachment', file);
@@ -201,8 +212,12 @@ export const SubmitComplaint = () => {
           const extension = audioExtensionFromMime(voiceNote.type);
           formData.append('voiceNote', voiceNote, `citizen-voice-complaint.${extension}`);
         }
-        complaint = await endpoints.createComplaint(formData);
+        complaint = await endpoints.createComplaint(formData, {
+          onUploadProgress: (progressEvent) => updateUploadProgress(progressEvent, estimatedUploadSize)
+        });
+        setUploadProgress({ loaded: estimatedUploadSize, total: estimatedUploadSize, percent: 100 });
       } else {
+        setUploadProgress(null);
         complaint = await endpoints.createComplaint(payload);
       }
       setForm({
@@ -216,6 +231,7 @@ export const SubmitComplaint = () => {
       toast.success(`Complaint submitted. Tracking number ${complaint.trackingNumber}.`);
       navigate(`/app/complaints/${complaint.trackingNumber}`);
     } catch (err) {
+      setUploadProgress(null);
       toast.error(errorMessage(err, 'Could not submit complaint'));
     } finally {
       setSaving(false);
@@ -315,6 +331,25 @@ export const SubmitComplaint = () => {
               />
               <p className="mt-1 text-xs text-slate-500">Use this for videos larger than 100 MB. Make sure the link is public or shared with permission.</p>
             </label>
+            {saving && uploadProgress && (
+              <div className="rounded-md border border-blue-100 bg-blue-50 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-bold text-blue-950">Uploading evidence</p>
+                  <p className="text-sm font-bold text-blue-700">{uploadProgress.percent}%</p>
+                </div>
+                <div className="mt-2 h-3 overflow-hidden rounded-full bg-white">
+                  <div
+                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                    style={{ width: `${Math.max(3, uploadProgress.percent)}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-blue-900">
+                  {uploadProgress.total
+                    ? `${formatFileSize(uploadProgress.loaded)} of ${formatFileSize(uploadProgress.total)} uploaded. Keep this page open.`
+                    : 'Uploading evidence. Keep this page open.'}
+                </p>
+              </div>
+            )}
           </div>
           <div className="mt-6 flex justify-end">
             <button className="btn-primary" disabled={saving || recording}>

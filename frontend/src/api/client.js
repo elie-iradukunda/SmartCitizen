@@ -48,12 +48,13 @@ export const endpoints = {
   complaints: (params) => unwrap(api.get('/complaints', { params })),
   myComplaints: () => unwrap(api.get('/complaints/my')),
   complaint: (trackingNumber) => unwrap(api.get(`/complaints/${trackingNumber}`)),
-  createComplaint: (payload) => {
+  createComplaint: (payload, options = {}) => {
     const isFormData = payload instanceof FormData;
     return unwrap(api.post('/complaints', payload, isFormData ? {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000
-    } : undefined));
+      timeout: 300000,
+      ...options
+    } : options));
   },
   updateComplaintStatus: (trackingNumber, payload) => unwrap(api.patch(`/complaints/${trackingNumber}/status`, payload)),
   deleteComplaint: (trackingNumber) => unwrap(api.delete(`/complaints/${trackingNumber}`)),
