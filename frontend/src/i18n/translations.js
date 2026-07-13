@@ -198,6 +198,7 @@ export const rwTranslations = {
   'Evidence Upload (image, video, audio, or PDF)': 'Shyiraho gihamya (ifoto, video, amajwi cyangwa PDF)',
   'Upload a video, audio file, image, or PDF as evidence. This can be submitted together with the voice recording.': 'Shyiraho video, amajwi, ifoto cyangwa PDF nk igihamya. Bishobora koherezwa hamwe n amajwi wafashe.',
   'Maximum upload size is 100 MB. For larger videos, paste a public evidence link below.': 'Ingano ntarengwa yo kohereza ni 100 MB. Ku ma video manini, shyiramo link rusange y igihamya hasi.',
+  'Maximum upload size is 100 MB. Video uploads can take a few minutes, so keep this page open. For larger videos, paste a public evidence link below.': 'Ingano ntarengwa yo kohereza ni 100 MB. Kohereza video bishobora gufata iminota mike, bityo ntufunge iyi paji. Ku ma video manini, shyiramo link rusange y igihamya hasi.',
   'Public evidence link (optional)': 'Link rusange y igihamya (si ngombwa)',
   'Use this for videos larger than 100 MB. Make sure the link is public or shared with permission.': 'Bikoreshe ku ma video arenze 100 MB. Menya neza ko link ifunguye cyangwa ifite uburenganzira bwo kuyireba.',
   'Public Evidence Link': 'Link rusange y igihamya',

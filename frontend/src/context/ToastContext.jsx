@@ -52,4 +52,12 @@ export const ToastProvider = ({ children }) => {
 
 export const useToast = () => useContext(ToastContext);
 
-export const errorMessage = (err, fallback = 'Something went wrong') => err?.response?.data?.message || fallback;
+export const errorMessage = (err, fallback = 'Something went wrong') => {
+  if (err?.code === 'ECONNABORTED') {
+    return 'Upload took too long. Use a file under 100 MB, keep the page open, or paste a public evidence link.';
+  }
+  if (!err?.response && err?.message === 'Network Error') {
+    return 'Upload did not complete. Check your connection, use a smaller file, or paste a public evidence link.';
+  }
+  return err?.response?.data?.message || fallback;
+};

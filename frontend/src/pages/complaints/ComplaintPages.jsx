@@ -302,7 +302,7 @@ export const SubmitComplaint = () => {
                   {file.name} - {formatFileSize(file.size)} {file.type?.startsWith('video/') ? '(video evidence)' : file.type?.startsWith('audio/') ? '(audio evidence)' : ''}
                 </p>
               )}
-              <p className="mt-1 text-xs text-slate-500">Maximum upload size is 100 MB. For larger videos, paste a public evidence link below.</p>
+              <p className="mt-1 text-xs text-slate-500">Maximum upload size is 100 MB. Video uploads can take a few minutes, so keep this page open. For larger videos, paste a public evidence link below.</p>
             </label>
             <label>
               <span className="label">Public evidence link (optional)</span>
