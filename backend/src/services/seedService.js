@@ -83,7 +83,6 @@ const seedUsers = async () => {
 
 const seedStaffUsers = async (officeByCode) => {
   const staffByOfficeCode = {};
-  const activeStaffEmails = demoStaff.map((staff) => staff.email);
   for (const staff of demoStaff) {
     const office = officeByCode[staff.officeCode];
     const { officeCode, ...profile } = staff;
@@ -95,10 +94,6 @@ const seedStaffUsers = async (officeByCode) => {
     if (record.officeId !== office.id) await record.update({ officeId: office.id });
     staffByOfficeCode[staff.officeCode] = record;
   }
-  await User.update(
-    { status: 'suspended' },
-    { where: { role: 'staff', email: { [Op.notIn]: activeStaffEmails } } }
-  );
   return staffByOfficeCode;
 };
 

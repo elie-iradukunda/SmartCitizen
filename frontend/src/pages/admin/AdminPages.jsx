@@ -128,7 +128,7 @@ export const AdminSetup = () => {
   if (!meta) return <LoadingState />;
 
   const officeName = (officeId) => meta.offices.find((office) => Number(office.id) === Number(officeId))?.name || 'No office selected';
-  const staffForOffice = (officeId) => users.filter((user) => user.role === 'staff' && Number(user.officeId) === Number(officeId));
+  const staffForOffice = (officeId) => users.filter((user) => user.role === 'staff' && user.status === 'active' && Number(user.officeId) === Number(officeId));
   const rulesForOffice = (officeId) => meta.routingRules.filter((rule) => Number(rule.officeId) === Number(officeId));
   const ruleForCategory = (categoryId) => meta.routingRules.find((rule) => Number(rule.categoryId) === Number(categoryId));
   const upsertById = (items, item) => {

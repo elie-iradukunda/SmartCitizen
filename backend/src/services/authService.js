@@ -16,8 +16,13 @@ export const authService = {
       error.status = 401;
       throw error;
     }
-    if (!allowedRoles.includes(user.role) || user.status !== 'active') {
+    if (!allowedRoles.includes(user.role)) {
       const error = new Error('This account is not enabled in the three-role SCFCMS prototype.');
+      error.status = 403;
+      throw error;
+    }
+    if (user.status !== 'active') {
+      const error = new Error('This account is suspended or pending. Ask the admin to activate it.');
       error.status = 403;
       throw error;
     }
