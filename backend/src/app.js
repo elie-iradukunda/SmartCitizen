@@ -17,10 +17,21 @@ const __dirname = path.dirname(__filename);
 const frontendDistPath = path.resolve(__dirname, '../../frontend/dist');
 
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
-app.use('/uploads', express.static('uploads'));
+app.use('/uploads', express.static(process.env.UPLOAD_DIR || 'uploads', {
+  setHeaders: (res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+  }
+}));
 
 app.get('/api/health', (req, res) => {
   res.json({

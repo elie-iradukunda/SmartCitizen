@@ -17,20 +17,12 @@ export const authController = {
 
   forgotPassword: asyncHandler(async (req, res) => {
     validateRequired(req.body, ['email']);
-    res.json({
-      message: 'Password reset link generated for demo purposes.',
-      resetLink: `/reset-password?email=${encodeURIComponent(req.body.email)}&token=demo-reset-token`
-    });
+    res.json(await authService.forgotPassword(req.body.email));
   }),
 
-  verifyOtp: asyncHandler(async (req, res) => {
-    validateRequired(req.body, ['email', 'otp']);
-    if (!['123456', '000000'].includes(req.body.otp)) {
-      const error = new Error('Invalid OTP. Use 123456 in demo mode.');
-      error.status = 422;
-      throw error;
-    }
-    res.json({ verified: true, message: 'OTP verified successfully' });
+  resetPassword: asyncHandler(async (req, res) => {
+    validateRequired(req.body, ['email', 'token', 'password']);
+    res.json(await authService.resetPassword(req.body));
   }),
 
   demoUsers: asyncHandler(async (req, res) => {

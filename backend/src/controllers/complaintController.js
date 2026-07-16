@@ -1,9 +1,13 @@
 import { complaintService } from '../services/complaintService.js';
+import { reportExportService } from '../services/reportExportService.js';
 import { asyncHandler, validateRequired } from './_helpers.js';
 
 export const complaintController = {
   meta: asyncHandler(async (req, res) => res.json(await complaintService.meta())),
   publicSummary: asyncHandler(async (req, res) => res.json(await complaintService.publicSummary())),
+  publicTrack: asyncHandler(async (req, res) => res.json(await complaintService.publicTrack(req.params.trackingNumber))),
+  publicFeedback: asyncHandler(async (req, res) => res.json(await complaintService.publicFeedback(req.query))),
+  slaCheck: asyncHandler(async (req, res) => res.json(await complaintService.runSlaCheck(req.user))),
   list: asyncHandler(async (req, res) => res.json(await complaintService.list(req.query, req.user))),
   mine: asyncHandler(async (req, res) => res.json(await complaintService.mine(req.user))),
   find: asyncHandler(async (req, res) => res.json(await complaintService.find(req.params.trackingNumber, req.user))),
@@ -22,12 +26,46 @@ export const complaintController = {
     res.status(201).json(await complaintService.create(req.body, req.user, files));
   }),
 
+  // No account, no name. The category is worked out from the text, and the reporter is
+  // given the tracking number as their only way back to the case.
+  createAnonymous: asyncHandler(async (req, res) => {
+    const files = {
+      attachment: req.files?.attachment?.[0] || null,
+      voiceNote: req.files?.voiceNote?.[0] || null
+    };
+    if (!req.body.description?.trim() && !req.body.evidenceLink?.trim() && !files.voiceNote && !files.attachment) {
+      const error = new Error('Describe what happened, or attach evidence.');
+      error.status = 422;
+      throw error;
+    }
+    const complaint = await complaintService.create(req.body, null, files);
+    res.status(201).json({
+      trackingNumber: complaint.trackingNumber,
+      status: complaint.status,
+      category: complaint.category,
+      assignedOffice: complaint.assignedOffice,
+      dueDate: complaint.dueDate
+    });
+  }),
+
   update: asyncHandler(async (req, res) => {
     res.json(await complaintService.update(req.params.trackingNumber, req.body, req.user));
   }),
 
   escalate: asyncHandler(async (req, res) => {
     res.json(await complaintService.escalate(req.params.trackingNumber, req.body, req.user));
+  }),
+
+  messages: asyncHandler(async (req, res) => {
+    res.json(await complaintService.messages(req.params.trackingNumber, req.user));
+  }),
+
+  sendMessage: asyncHandler(async (req, res) => {
+    res.status(201).json(await complaintService.sendMessage(req.params.trackingNumber, req.body, req.user));
+  }),
+
+  requestEscalation: asyncHandler(async (req, res) => {
+    res.json(await complaintService.requestEscalation(req.params.trackingNumber, req.body, req.user));
   }),
 
   rate: asyncHandler(async (req, res) => {
@@ -76,6 +114,13 @@ export const complaintController = {
   }),
 
   reports: asyncHandler(async (req, res) => res.json(await complaintService.reports(req.user))),
+  reportExport: asyncHandler(async (req, res) => {
+    const format = req.query.format === 'html' ? 'html' : 'csv';
+    const file = reportExportService.file(format, await complaintService.reports(req.user), req.user);
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.send(file.body);
+  }),
   notifications: asyncHandler(async (req, res) => res.json(await complaintService.notifications(req.user))),
   markRead: asyncHandler(async (req, res) => res.json(await complaintService.markNotificationRead(req.params.id, req.user))),
   unreadCount: asyncHandler(async (req, res) => res.json(await complaintService.unreadNotificationCount(req.user))),

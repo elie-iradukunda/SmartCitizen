@@ -26,24 +26,18 @@ export const ToastProvider = ({ children }) => {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex w-80 max-w-[90vw] flex-col gap-2">
+      <div className="toast-wrap">
         {toasts.map((toast) => (
-          <div
+          <button
             key={toast.id}
-            className={`flex items-start justify-between gap-3 rounded-md border-l-4 bg-white p-3 text-sm shadow-soft ${
-              toast.type === 'success' ? 'border-emerald-500' : toast.type === 'error' ? 'border-red-500' : 'border-blue-500'
-            }`}
+            type="button"
+            onClick={() => dismiss(toast.id)}
+            className={`toast ${toast.type}`}
+            aria-label="Dismiss notification"
           >
-            <p className="font-semibold text-slate-800">{toast.message}</p>
-            <button
-              type="button"
-              onClick={() => dismiss(toast.id)}
-              className="text-slate-400 hover:text-slate-600"
-              aria-label="Dismiss notification"
-            >
-              ×
-            </button>
-          </div>
+            <span aria-hidden="true">{toast.type === 'error' ? '⚠' : toast.type === 'info' ? 'ℹ' : '✓'}</span>
+            {toast.message}
+          </button>
         ))}
       </div>
     </ToastContext.Provider>

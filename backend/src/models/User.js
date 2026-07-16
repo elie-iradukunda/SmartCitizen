@@ -20,5 +20,8 @@ export const defineUser = (sequelize) => sequelize.define('User', {
   preferredLanguage: { type: DataTypes.STRING(40), defaultValue: 'English' },
   avatar: DataTypes.TEXT,
   officeId: DataTypes.INTEGER,
-  status: { type: DataTypes.ENUM('active', 'suspended', 'pending'), defaultValue: 'active' }
+  status: { type: DataTypes.ENUM('active', 'suspended', 'pending'), defaultValue: 'active' },
+  // Real password reset: only the hash of the emailed token is stored, and it expires.
+  resetTokenHash: DataTypes.STRING(255),
+  resetTokenExpiry: DataTypes.DATE
 });

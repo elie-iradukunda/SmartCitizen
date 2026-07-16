@@ -1,60 +1,51 @@
-import {
-  BarChart3,
-  Bell,
-  CheckSquare,
-  Gauge,
-  Home,
-  Inbox,
-  ListChecks,
-  LockKeyhole,
-  LogIn,
-  MessageSquare,
-  PlusCircle,
-  ShieldCheck,
-  SlidersHorizontal,
-  Tags,
-  User,
-  Users
-} from 'lucide-react';
-
-export const publicLinks = [
-  { label: 'Home', to: '/', icon: Home },
-  { label: 'Login', to: '/login', icon: LogIn },
-  { label: 'Contact', to: '/contact', icon: MessageSquare }
-];
-
-export const sidebarLinks = {
+// One tab bar per role. Everything else (updating a case, responding, escalating,
+// rating) happens inside the case card itself, so there is nothing else to navigate to.
+export const tabLinks = {
   citizen: [
-    { label: 'Dashboard', to: '/app/dashboard', icon: Gauge },
-    { label: 'Submit Complaint', to: '/app/submit-complaint', icon: PlusCircle },
-    { label: 'Track Status', to: '/app/complaints', icon: Inbox },
-    { label: 'Responses', to: '/app/notifications', icon: Bell },
-    { label: 'Profile', to: '/app/profile', icon: User }
+    { label: 'Submit Complaint', to: '/app/submit-complaint', icon: '+' },
+    { label: 'My Complaints', to: '/app/complaints', icon: '#' },
+    { label: 'Citizen Feedback', to: '/app/feedback', icon: '*' },
+    { label: 'Notifications', to: '/app/notifications', icon: '!', badge: 'unread' },
+    { label: 'Profile', to: '/app/profile', icon: '@' }
   ],
   staff: [
-    { label: 'Dashboard', to: '/staff/dashboard', icon: Gauge },
-    { label: 'Assigned Cases', to: '/staff/cases', icon: ListChecks },
-    { label: 'Review & Prioritize', to: '/staff/all-cases', icon: CheckSquare },
-    { label: 'Respond / Update', to: '/staff/respond', icon: MessageSquare },
-    { label: 'Escalations', to: '/staff/escalations', icon: ShieldCheck },
-    { label: 'Reports', to: '/staff/reports', icon: BarChart3 },
-    { label: 'Notifications', to: '/staff/notifications', icon: Bell }
+    { label: 'Cases', to: '/staff/cases', icon: '>' },
+    { label: 'Reports', to: '/staff/reports', icon: '%' },
+    { label: 'Citizen Feedback', to: '/staff/feedback', icon: '*' },
+    { label: 'Notifications', to: '/staff/notifications', icon: '!', badge: 'unread' }
   ],
   admin: [
-    { label: 'Dashboard', to: '/admin/dashboard', icon: Gauge },
-    { label: 'Complaint Setup', to: '/admin/setup', icon: CheckSquare },
-    { label: 'Complaint Register', to: '/admin/complaints', icon: Inbox },
-    { label: 'Users & Roles', to: '/admin/users', icon: Users },
-    { label: 'Categories & SLA', to: '/admin/categories', icon: Tags },
-    { label: 'Complaint Routing', to: '/admin/routing', icon: SlidersHorizontal },
-    { label: 'System Security', to: '/admin/security', icon: ShieldCheck },
-    { label: 'Reports & Analytics', to: '/admin/reports', icon: BarChart3 },
-    { label: 'Audit Logs', to: '/admin/audit-logs', icon: LockKeyhole }
+    { label: 'Overview', to: '/admin/dashboard', icon: '%' },
+    { label: 'All Complaints', to: '/admin/complaints', icon: '#' },
+    { label: 'Reports', to: '/admin/reports', icon: '$' },
+    { label: 'Citizen Feedback', to: '/admin/feedback', icon: '*' },
+    { label: 'Categories, SLA & Routing', to: '/admin/setup', icon: '*' },
+    { label: 'Users & Roles', to: '/admin/users', icon: '@' },
+    { label: 'Audit Log', to: '/admin/audit-logs', icon: '=' }
   ]
 };
 
+export const roleLabel = {
+  citizen: 'Citizen',
+  staff: 'Administrative Staff',
+  admin: 'Admin'
+};
+
+export const roleTone = {
+  citizen: { background: '#e0f2fe', color: '#0ea5e9', icon: '@' },
+  staff: { background: '#e0f2fe', color: '#0284c7', icon: '>' },
+  admin: { background: '#ede9fe', color: '#7c3aed', icon: '$' }
+};
+
 export const roleHome = {
-  citizen: '/app/dashboard',
-  staff: '/staff/dashboard',
+  citizen: '/app/submit-complaint',
+  staff: '/staff/cases',
   admin: '/admin/dashboard'
 };
+
+export const publicLinks = [
+  { label: 'Home', to: '/' },
+  { label: 'About', to: '/about' },
+  { label: 'Contact', to: '/contact' },
+  { label: 'Login', to: '/login' }
+];

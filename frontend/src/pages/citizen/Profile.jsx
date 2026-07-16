@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Save, UserCircle2 } from 'lucide-react';
 import { endpoints } from '../../api/client.js';
 import { LoadingState } from '../../components/LoadingState.jsx';
-import { PageHeader } from '../../components/PageHeader.jsx';
+import { PageTitle } from '../../components/Ui.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast, errorMessage } from '../../context/ToastContext.jsx';
 import { kacyiruDefaults, kacyiruLocation, villagesForCell } from '../../data/kacyiruLocations.js';
@@ -22,7 +21,7 @@ export const Profile = () => {
         village: profile.village || kacyiruDefaults.village,
         preferredLanguage: profile.preferredLanguage || 'Kinyarwanda'
       }))
-      .catch((err) => toast.error(errorMessage(err, 'Could not load profile')));
+      .catch((err) => toast.error(errorMessage(err, 'Could not load your profile')));
   }, []);
 
   if (!form) return <LoadingState />;
@@ -38,93 +37,89 @@ export const Profile = () => {
         phone: form.phone,
         nationalId: form.nationalId,
         gender: form.gender,
-        province: kacyiruDefaults.province,
-        district: kacyiruDefaults.district,
-        sector: kacyiruDefaults.sector,
+        ...kacyiruDefaults,
         cell: form.cell,
         village: form.village,
         address: form.address,
         preferredLanguage: form.preferredLanguage
       });
       updateUser(updated);
-      toast.success('Profile updated.');
+      toast.success('Your profile was saved.');
     } catch (err) {
-      toast.error(errorMessage(err, 'Could not update profile'));
+      toast.error(errorMessage(err, 'Could not save your profile'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div>
-      <PageHeader title="My Profile" subtitle="Manage your personal details used for complaint submission and contact." />
-      <form onSubmit={submit} className="panel max-w-2xl p-6">
-        <div className="flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-full bg-brand-50 text-brand-600"><UserCircle2 size={26} /></span>
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="My profile" subtitle="These details are attached to every complaint you submit, so you never type them twice." />
+      <form onSubmit={submit} className="card" style={{ marginTop: 18, maxWidth: 680 }}>
+        <p className="card-t">{form.fullName}</p>
+        <small className="hint">{form.email}</small>
+
+        <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', marginTop: 16 }}>
           <div>
-            <p className="font-bold text-slate-950">{form.email}</p>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Citizen Account</p>
+            <label className="label" htmlFor="fullName">Full name</label>
+            <input id="fullName" className="input" value={form.fullName || ''} onChange={(event) => update('fullName', event.target.value)} />
           </div>
-        </div>
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <Field label="Full Name" value={form.fullName || ''} onChange={(value) => update('fullName', value)} />
-          <Field label="Phone" value={form.phone || ''} onChange={(value) => update('phone', value)} />
-          <Field label="National ID / Citizen ID" value={form.nationalId || ''} onChange={(value) => update('nationalId', value)} />
-          <label>
-            <span className="label">Gender</span>
-            <select className="input" value={form.gender || ''} onChange={(event) => update('gender', event.target.value)}>
-              <option value="">Select gender</option>
+          <div>
+            <label className="label" htmlFor="profile-phone">Phone</label>
+            <input id="profile-phone" className="input" value={form.phone || ''} onChange={(event) => update('phone', event.target.value)} />
+          </div>
+          <div>
+            <label className="label" htmlFor="nationalId">National ID</label>
+            <input id="nationalId" className="input" value={form.nationalId || ''} onChange={(event) => update('nationalId', event.target.value)} />
+          </div>
+          <div>
+            <label className="label" htmlFor="gender">Gender</label>
+            <select id="gender" className="input" value={form.gender || ''} onChange={(event) => update('gender', event.target.value)}>
+              <option value="">Not stated</option>
               <option>Female</option>
               <option>Male</option>
               <option>Other</option>
             </select>
-          </label>
-          <Field label="Province" value={kacyiruDefaults.province} readOnly />
-          <Field label="District" value={kacyiruDefaults.district} readOnly />
-          <Field label="Sector" value={kacyiruDefaults.sector} readOnly />
-          <label>
-            <span className="label">Cell</span>
+          </div>
+          <div>
+            <label className="label" htmlFor="profile-cell">Cell</label>
             <select
+              id="profile-cell"
               className="input"
-              value={form.cell || kacyiruDefaults.cell}
+              value={form.cell}
               onChange={(event) => {
-                const cell = event.target.value;
-                update('cell', cell);
-                update('village', villagesForCell(cell)[0] || '');
+                update('cell', event.target.value);
+                update('village', villagesForCell(event.target.value)[0] || '');
               }}
             >
               {kacyiruLocation.cells.map((cell) => <option key={cell.name}>{cell.name}</option>)}
             </select>
-          </label>
-          <label>
-            <span className="label">Village</span>
-            <select className="input" value={form.village || villagesForCell(form.cell || kacyiruDefaults.cell)[0] || ''} onChange={(event) => update('village', event.target.value)}>
-              {villagesForCell(form.cell || kacyiruDefaults.cell).map((village) => <option key={village}>{village}</option>)}
+          </div>
+          <div>
+            <label className="label" htmlFor="profile-village">Village</label>
+            <select id="profile-village" className="input" value={form.village} onChange={(event) => update('village', event.target.value)}>
+              {villagesForCell(form.cell).map((village) => <option key={village}>{village}</option>)}
             </select>
-          </label>
-          <Field label="Address / Street" value={form.address || ''} onChange={(value) => update('address', value)} />
-          <label>
-            <span className="label">Preferred Language</span>
-            <select className="input" value={form.preferredLanguage || 'Kinyarwanda'} onChange={(event) => update('preferredLanguage', event.target.value)}>
+          </div>
+          <div>
+            <label className="label" htmlFor="address">Address / street</label>
+            <input id="address" className="input" value={form.address || ''} onChange={(event) => update('address', event.target.value)} />
+          </div>
+          <div>
+            <label className="label" htmlFor="language">Preferred language</label>
+            <select id="language" className="input" value={form.preferredLanguage} onChange={(event) => update('preferredLanguage', event.target.value)}>
               <option>Kinyarwanda</option>
               <option>English</option>
             </select>
-          </label>
+          </div>
         </div>
-        <div className="mt-6 flex justify-end">
-          <button className="btn-primary" disabled={saving}>
-            <Save size={16} />
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
+
+        <small className="hint" style={{ marginTop: 12 }}>Case study area: Kacyiru Sector, Gasabo District, Kigali City.</small>
+
+        <button className="btn" style={{ marginTop: 16 }} disabled={saving}>
+          {saving ? 'Saving…' : 'Save profile'}
+        </button>
       </form>
     </div>
   );
 };
-
-const Field = ({ label, value, onChange = () => {}, readOnly = false }) => (
-  <label>
-    <span className="label">{label}</span>
-    <input className="input" value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
-  </label>
-);

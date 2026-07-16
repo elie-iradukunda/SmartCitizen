@@ -7,167 +7,164 @@ CREATE TABLE users (
   email VARCHAR(190) NOT NULL UNIQUE,
   password VARCHAR(255) NOT NULL,
   phone VARCHAR(40),
-  role ENUM('citizen','reviewer','institution','admin','superadmin') DEFAULT 'citizen',
+  national_id VARCHAR(40),
+  role ENUM('citizen','staff','admin') DEFAULT 'citizen',
   gender VARCHAR(40),
   province VARCHAR(120),
   district VARCHAR(120),
   sector VARCHAR(120),
+  cell VARCHAR(120),
+  village VARCHAR(120),
+  address VARCHAR(240),
+  preferred_language VARCHAR(40) DEFAULT 'English',
   avatar TEXT,
-  badges JSON,
-  points INT DEFAULT 0,
+  office_id BIGINT,
   status ENUM('active','suspended','pending') DEFAULT 'active',
+  reset_token_hash VARCHAR(255),
+  reset_token_expiry DATETIME,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE categories (
+CREATE TABLE complaint_categories (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  name VARCHAR(120) NOT NULL UNIQUE,
-  color VARCHAR(20) DEFAULT '#2563eb',
+  code VARCHAR(80) NOT NULL UNIQUE,
+  name VARCHAR(180) NOT NULL UNIQUE,
   description TEXT,
+  default_priority ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
+  sla_days INT DEFAULT 3,
+  active BOOLEAN DEFAULT TRUE,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE ideas (
+CREATE TABLE offices (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  public_id VARCHAR(80) NOT NULL UNIQUE,
-  title VARCHAR(220) NOT NULL,
-  slug VARCHAR(240) NOT NULL UNIQUE,
-  status ENUM('Under Review','Approved','In Progress','Implemented','Rejected') DEFAULT 'Under Review',
-  submitted_at DATE,
-  votes INT DEFAULT 0,
-  downvotes INT DEFAULT 0,
-  comments INT DEFAULT 0,
-  bookmarks INT DEFAULT 0,
-  shares INT DEFAULT 0,
-  level VARCHAR(120),
-  technology TEXT,
-  estimated_cost DECIMAL(14,2) DEFAULT 0,
-  beneficiaries TEXT,
-  location VARCHAR(240),
-  problem TEXT NOT NULL,
-  solution TEXT NOT NULL,
-  impact TEXT,
-  summary TEXT,
-  images JSON,
-  files JSON,
-  score INT DEFAULT 0,
-  review_comment TEXT,
-  author_id BIGINT,
-  category_id BIGINT,
+  code VARCHAR(80) NOT NULL UNIQUE,
+  name VARCHAR(180) NOT NULL UNIQUE,
+  contact_person VARCHAR(160),
+  phone VARCHAR(40),
+  email VARCHAR(190),
+  active BOOLEAN DEFAULT TRUE,
+  is_sector_executive BOOLEAN DEFAULT FALSE,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL
+);
+
+ALTER TABLE users
+  ADD CONSTRAINT fk_users_office
+  FOREIGN KEY (office_id) REFERENCES offices(id);
+
+CREATE TABLE routing_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  code VARCHAR(80) NOT NULL UNIQUE,
+  category_id BIGINT NOT NULL,
+  office_id BIGINT NOT NULL,
+  location VARCHAR(180) DEFAULT 'Kacyiru',
+  priority ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
+  sla_days INT DEFAULT 3,
+  active BOOLEAN DEFAULT TRUE,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  FOREIGN KEY (author_id) REFERENCES users(id),
-  FOREIGN KEY (category_id) REFERENCES categories(id)
+  CONSTRAINT fk_routing_category FOREIGN KEY (category_id) REFERENCES complaint_categories(id),
+  CONSTRAINT fk_routing_office FOREIGN KEY (office_id) REFERENCES offices(id)
 );
 
-CREATE TABLE challenges (
+CREATE TABLE complaints (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(220) NOT NULL,
+  tracking_number VARCHAR(40) NOT NULL UNIQUE,
+  is_anonymous BOOLEAN DEFAULT FALSE,
+  citizen_id BIGINT,
+  category_id BIGINT NOT NULL,
+  office_id BIGINT NOT NULL,
+  citizen_name VARCHAR(160) NOT NULL,
+  citizen_phone VARCHAR(40),
   description TEXT NOT NULL,
-  authority VARCHAR(180),
-  deadline DATE,
-  ideas_count INT DEFAULT 0,
-  prize VARCHAR(180),
-  status ENUM('Open','Closed','Awarded') DEFAULT 'Open',
-  image TEXT,
-  category_id BIGINT,
+  location VARCHAR(240),
+  cell VARCHAR(120),
+  village VARCHAR(120),
+  priority ENUM('Low','Medium','High','Critical') DEFAULT 'Medium',
+  status ENUM('Assigned','In Review','Waiting for Citizen','Resolved','Closed','Escalated') DEFAULT 'Assigned',
+  assigned_to VARCHAR(160),
+  escalated_to VARCHAR(180),
+  channel VARCHAR(80) DEFAULT 'Web Portal',
+  submission_mode VARCHAR(80) DEFAULT 'Typed form',
+  evidence_type VARCHAR(40),
+  attachment_name VARCHAR(220),
+  attachment_path VARCHAR(255),
+  evidence_link VARCHAR(500),
+  voice_note_name VARCHAR(220),
+  voice_note_path VARCHAR(255),
+  voice_note_type VARCHAR(40),
+  due_date DATE,
+  chat_opened_at DATETIME,
+  escalation_requested_at DATETIME,
+  resolved_at DATETIME,
+  closed_at DATETIME,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  FOREIGN KEY (category_id) REFERENCES categories(id)
+  CONSTRAINT fk_complaints_citizen FOREIGN KEY (citizen_id) REFERENCES users(id),
+  CONSTRAINT fk_complaints_category FOREIGN KEY (category_id) REFERENCES complaint_categories(id),
+  CONSTRAINT fk_complaints_office FOREIGN KEY (office_id) REFERENCES offices(id),
+  INDEX idx_complaints_status (status),
+  INDEX idx_complaints_due_date (due_date),
+  INDEX idx_complaints_created_at (created_at)
 );
 
-CREATE TABLE projects (
+CREATE TABLE complaint_responses (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(220) NOT NULL,
-  stage VARCHAR(80) DEFAULT 'Validation',
-  owner VARCHAR(160),
-  progress INT DEFAULT 0,
-  target_amount DECIMAL(14,2) DEFAULT 0,
-  raised_amount DECIMAL(14,2) DEFAULT 0,
-  partners JSON,
-  idea_id BIGINT,
+  complaint_id BIGINT NOT NULL,
+  responder_id BIGINT,
+  responder VARCHAR(180) NOT NULL,
+  response_text TEXT NOT NULL,
+  status_update ENUM('Assigned','In Review','Waiting for Citizen','Resolved','Closed','Escalated') NOT NULL,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  FOREIGN KEY (idea_id) REFERENCES ideas(id)
+  CONSTRAINT fk_responses_complaint FOREIGN KEY (complaint_id) REFERENCES complaints(id),
+  CONSTRAINT fk_responses_user FOREIGN KEY (responder_id) REFERENCES users(id)
 );
 
-CREATE TABLE events (
+-- The private conversation between a citizen and the office holding their case. It only
+-- opens once that office has answered, which is why chat_opened_at lives on complaints.
+CREATE TABLE complaint_messages (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(220) NOT NULL,
-  type VARCHAR(80),
-  event_date DATE NOT NULL,
-  location VARCHAR(220),
-  capacity INT DEFAULT 0,
-  registered INT DEFAULT 0,
-  description TEXT,
+  complaint_id BIGINT NOT NULL,
+  sender_id BIGINT,
+  sender_name VARCHAR(180) NOT NULL,
+  sender_role ENUM('citizen','staff','admin') NOT NULL,
+  body TEXT NOT NULL,
+  read_by_citizen BOOLEAN DEFAULT FALSE,
+  read_by_office BOOLEAN DEFAULT FALSE,
   created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
+  updated_at DATETIME NOT NULL,
+  CONSTRAINT fk_messages_complaint FOREIGN KEY (complaint_id) REFERENCES complaints(id),
+  CONSTRAINT fk_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id),
+  INDEX idx_messages_complaint (complaint_id, created_at)
 );
 
-CREATE TABLE messages (
+CREATE TABLE satisfaction_ratings (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  thread_id VARCHAR(100) NOT NULL,
-  `from` VARCHAR(160) NOT NULL,
-  `to` VARCHAR(160),
-  text TEXT NOT NULL,
-  mine BOOLEAN DEFAULT FALSE,
+  complaint_id BIGINT NOT NULL UNIQUE,
+  score INT NOT NULL,
+  comment TEXT,
+  is_public BOOLEAN DEFAULT TRUE,
+  rated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
+  updated_at DATETIME NOT NULL,
+  CONSTRAINT fk_ratings_complaint FOREIGN KEY (complaint_id) REFERENCES complaints(id)
 );
 
-CREATE TABLE notifications (
+CREATE TABLE complaint_notifications (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(180) NOT NULL,
-  message TEXT NOT NULL,
-  type VARCHAR(80),
-  `read` BOOLEAN DEFAULT FALSE,
   user_id BIGINT,
+  complaint_id BIGINT,
+  title VARCHAR(160) NOT NULL,
+  message TEXT NOT NULL,
+  `read` BOOLEAN DEFAULT FALSE,
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-
-CREATE TABLE badges (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(120) NOT NULL,
-  description TEXT,
-  icon VARCHAR(80),
-  created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
-);
-
-CREATE TABLE achievements (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(120) NOT NULL,
-  description TEXT,
-  progress INT DEFAULT 0,
-  icon VARCHAR(80),
-  created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
-);
-
-CREATE TABLE funding (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  investor VARCHAR(180) NOT NULL,
-  amount DECIMAL(14,2) NOT NULL,
-  status ENUM('Committed','Released','Cancelled') DEFAULT 'Committed',
-  funded_at DATE,
-  project_id BIGINT,
-  created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL,
-  FOREIGN KEY (project_id) REFERENCES projects(id)
-);
-
-CREATE TABLE reports (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  title VARCHAR(220) NOT NULL,
-  type VARCHAR(80) NOT NULL,
-  owner VARCHAR(160),
-  created_on DATE,
-  created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
+  CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_notifications_complaint FOREIGN KEY (complaint_id) REFERENCES complaints(id)
 );
 
 CREATE TABLE audit_logs (
@@ -179,3 +176,7 @@ CREATE TABLE audit_logs (
   updated_at DATETIME NOT NULL
 );
 
+CREATE TABLE counters (
+  `key` VARCHAR(60) PRIMARY KEY,
+  value INT DEFAULT 0
+);

@@ -1,5 +1,5 @@
 import { ensureDatabase, sequelize } from '../config/database.js';
-import { Complaint, User } from '../models/index.js';
+import { Complaint, Office, SatisfactionRating, User } from '../models/index.js';
 import { seedDemoData } from './seedService.js';
 
 const ensureColumn = async (queryInterface, model, attributeName) => {
@@ -27,12 +27,19 @@ const ensureSchemaColumns = async () => {
     [User, 'village'],
     [User, 'address'],
     [User, 'preferredLanguage'],
+    [User, 'resetTokenHash'],
+    [User, 'resetTokenExpiry'],
+    [Office, 'isSectorExecutive'],
+    [Complaint, 'isAnonymous'],
     [Complaint, 'submissionMode'],
     [Complaint, 'evidenceType'],
     [Complaint, 'evidenceLink'],
     [Complaint, 'voiceNoteName'],
     [Complaint, 'voiceNotePath'],
-    [Complaint, 'voiceNoteType']
+    [Complaint, 'voiceNoteType'],
+    [Complaint, 'chatOpenedAt'],
+    [Complaint, 'escalationRequestedAt'],
+    [SatisfactionRating, 'isPublic']
   ];
 
   for (const [model, attributeName] of additions) {

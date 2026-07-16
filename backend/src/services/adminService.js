@@ -1,4 +1,11 @@
 import { AuditLog, Complaint, Office, User } from '../models/index.js';
+import {
+  assertNationalId,
+  assertNationalIdUnique,
+  assertPasswordStrength,
+  hashPassword,
+  normalizeNationalId
+} from './authService.js';
 import { publicUser, serializeAuditLog } from './serializers.js';
 
 const allowedRoles = ['citizen', 'staff', 'admin'];
@@ -54,13 +61,24 @@ export const adminService = {
       error.status = 409;
       throw error;
     }
+    assertPasswordStrength(payload.password);
     const role = payload.role || 'citizen';
+    // A citizen account is tied to a real person by their ID, however it was created. Staff
+    // and admin accounts are office roles, so they are not required to carry one.
+    let nationalId = normalizeNationalId(payload.nationalId);
+    if (role === 'citizen') {
+      nationalId = assertNationalId(payload.nationalId);
+      await assertNationalIdUnique(nationalId);
+    } else if (nationalId) {
+      assertNationalId(nationalId);
+      await assertNationalIdUnique(nationalId);
+    }
     const user = await User.create({
       fullName: payload.fullName,
       email: payload.email,
-      password: payload.password,
+      password: await hashPassword(payload.password),
       phone: payload.phone || '',
-      nationalId: payload.nationalId || '',
+      nationalId,
       role,
       gender: payload.gender || '',
       province: payload.province || kacyiruDefaults.province,
@@ -88,6 +106,16 @@ export const adminService = {
       const error = new Error('Only Citizen, Administrative Staff, and Admin roles are enabled.');
       error.status = 422;
       throw error;
+    }
+    if (updates.password) {
+      assertPasswordStrength(updates.password);
+      updates.password = await hashPassword(updates.password);
+    } else {
+      delete updates.password;
+    }
+    if (updates.nationalId !== undefined && normalizeNationalId(updates.nationalId)) {
+      updates.nationalId = assertNationalId(updates.nationalId);
+      await assertNationalIdUnique(updates.nationalId, user.id);
     }
     const role = updates.role || user.role;
     updates.officeId = await resolveOfficeId(role, payload.officeId, user.officeId);

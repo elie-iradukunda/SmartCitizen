@@ -1,667 +1,480 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart3, ClipboardList, FileText, KeyRound, PlusCircle, Settings, Trash2, Users } from 'lucide-react';
 import { endpoints } from '../../api/client.js';
 import { LoadingState } from '../../components/LoadingState.jsx';
-import { PageHeader } from '../../components/PageHeader.jsx';
-import { StatusBadge } from '../../components/StatusBadge.jsx';
-import { useToast, errorMessage } from '../../context/ToastContext.jsx';
+import { Badge, Bar, Empty, PageTitle, Stat, formatDateTime } from '../../components/Ui.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { useToast, errorMessage } from '../../context/ToastContext.jsx';
+
+/* ══════════════ OVERVIEW ══════════════ */
 
 export const AdminDashboard = () => {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    Promise.all([endpoints.complaintReports(), endpoints.complaints(), endpoints.users()]).then(([reports, complaints, users]) => {
-      setData({ reports, complaints, users });
-    });
-  }, []);
-  if (!data) return <LoadingState />;
+  const toast = useToast();
+  const [reports, setReports] = useState(null);
+  const [running, setRunning] = useState(false);
 
-  const { reports, complaints, users } = data;
-  const currentMonth = new Date().toISOString().slice(0, 7);
-  const thisMonth = complaints.filter((complaint) => String(complaint.createdAt || '').slice(0, 7) === currentMonth).length;
-  const satisfactionRate = `${reports.summary.averageSatisfaction || 0}/5`;
+  const load = () => endpoints.complaintReports().then(setReports).catch(() => setReports(null));
+  useEffect(() => { load(); }, []);
+
+  if (!reports) return <LoadingState />;
+
+  const { summary, byCategory, byStatus } = reports;
+  const totalByCategory = byCategory.reduce((sum, item) => sum + item.value, 0);
+  const totalByStatus = byStatus.reduce((sum, item) => sum + item.value, 0);
+  const complaintFilterUrl = (params = {}) => {
+    const search = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== 'all') search.set(key, value);
+    });
+    const query = search.toString();
+    return query ? `/admin/complaints?${query}` : '/admin/complaints';
+  };
+
+  const runSlaCheck = async () => {
+    setRunning(true);
+    try {
+      const result = await endpoints.runSlaCheck();
+      toast.success(result.escalated
+        ? `${result.escalated} complaint(s) passed their due date and were escalated automatically.`
+        : 'No complaint has passed its due date.');
+      load();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not run the SLA check'));
+    } finally {
+      setRunning(false);
+    }
+  };
 
   return (
-    <div className="space-y-5">
-      <section className="overflow-hidden rounded-lg border border-violet-200 bg-white shadow-soft">
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-violet-700 px-5 py-4 text-white">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-violet-100">Admin Dashboard</p>
-            <h1 className="text-xl font-bold">Manage users, roles, categories, SLAs, security, routing, and analytics</h1>
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="Admin · Kacyiru Sector" subtitle="Every complaint in the sector, the rules that route them, and who can do what." />
+
+      <div className="stats">
+        <Link className="stat-link" to={complaintFilterUrl()}><Stat label="All complaints" value={summary.totalComplaints} /></Link>
+        <Link className="stat-link" to={complaintFilterUrl({ statusGroup: 'resolved' })}><Stat label="Resolved / closed" value={summary.resolved} /></Link>
+        <Link className="stat-link" to={complaintFilterUrl({ overdue: 'true' })}><Stat label="Past due date" value={summary.overdue} danger /></Link>
+        <Link className="stat-link" to={complaintFilterUrl({ status: 'Escalated' })}><Stat label="Escalated" value={summary.escalated} /></Link>
+        <Link className="stat-link" to="/admin/reports"><Stat label="Average rating" value={summary.averageSatisfaction || '—'} /></Link>
+      </div>
+
+      <div className="grid g2">
+        <div className="card">
+          <p className="card-t">Complaints by category</p>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {byCategory.map((item) => (
+              <Link className="bar-link" key={item.name} to={complaintFilterUrl({ categoryId: item.id })}>
+                <Bar label={item.name} value={item.value} total={totalByCategory} />
+              </Link>
+            ))}
           </div>
-          <Link to="/admin/reports" className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-bold text-violet-700">
-            <BarChart3 size={16} />
-            View Reports
-          </Link>
         </div>
 
-        <div className="grid gap-5 p-5">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <AdminStat label="Total Complaints" value={complaints.length} color="bg-violet-700" />
-            <AdminStat label="This Month" value={thisMonth} color="bg-blue-600" />
-            <AdminStat label="Needs Attention" value={reports.summary.needsAdminAttention || 0} color="bg-red-600" />
-            <AdminStat label="Resolved" value={reports.summary.resolved} color="bg-emerald-600" />
-            <AdminStat label="Satisfaction Rate" value={satisfactionRate} color="bg-amber-500" />
+        <div className="card">
+          <p className="card-t">Complaints by status</p>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {byStatus.length === 0
+              ? <small className="hint">No complaints yet.</small>
+              : byStatus.map((item) => (
+                <Link className="bar-link" key={item.name} to={complaintFilterUrl({ status: item.name })}>
+                  <Bar label={item.name} value={item.value} total={totalByStatus} />
+                </Link>
+              ))}
           </div>
-
-          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.9fr]">
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">Complaints Overview</h2>
-              <AdminRows data={reports.byStatus} color="bg-violet-700" />
-            </section>
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">System Health</h2>
-              <div className="mt-3 grid gap-2 text-xs">
-                <HealthRow label="System Status" value="Online" />
-                <HealthRow label="Database" value="Healthy" />
-                <HealthRow label="Role-Based Access" value="Enabled" />
-                <HealthRow label="Active Users" value={users.length} />
-              </div>
-            </section>
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-3">
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">By Category</h2>
-              <AdminRows data={reports.byCategory} color="bg-blue-600" />
-            </section>
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">By Office</h2>
-              <AdminRows data={reports.byOffice} color="bg-violet-700" />
-            </section>
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">Recent System Activities</h2>
-              <div className="mt-3 space-y-2">
-                {reports.auditLogs.slice(0, 4).map((log) => (
-                  <div key={log.id} className="rounded-md bg-slate-50 p-3">
-                    <p className="text-xs font-bold text-slate-900">{log.action}</p>
-                    <p className="mt-1 text-xs text-slate-500">{log.actor} - {new Date(log.createdAt).toLocaleString()}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <section className="rounded-lg border border-slate-200 p-4">
-            <h2 className="text-sm font-bold text-slate-950">Reports & Analytics</h2>
-            <div className="mt-3 grid gap-3 sm:grid-cols-4">
-              <ReportLink to="/admin/setup" label="Complaint Setup" />
-              <ReportLink to="/admin/reports" label="Office Performance" />
-              <ReportLink to="/admin/categories" label="SLA Compliance" />
-              <ReportLink to="/admin/reports" label="Citizen Satisfaction" />
-            </div>
-          </section>
         </div>
-      </section>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <p className="card-t">Automatic escalation (SLA)</p>
+        <p style={{ fontSize: 13.5, color: 'var(--muted)', marginTop: 8, lineHeight: 1.6 }}>
+          Any complaint that passes its due date is escalated on its own to the Sector Executive Office, and the citizen is
+          notified. In production this runs as a daily job; here you can run it now.
+        </p>
+        <button type="button" className="btn" style={{ marginTop: 14 }} disabled={running} onClick={runSlaCheck}>
+          {running ? 'Checking…' : '▶ Run the SLA check now'}
+        </button>
+      </div>
     </div>
   );
 };
 
-const emptyUser = { fullName: '', email: '', phone: '', password: '', role: 'citizen', district: '', officeId: '' };
-const emptyOffice = { name: '', contactPerson: '', phone: '', email: '' };
-const emptySetupCategory = { name: '', description: '', defaultPriority: 'Medium', slaDays: 3, officeId: '', location: 'Kacyiru' };
-const emptyStaffAccount = { fullName: '', email: '', phone: '', password: 'password', officeId: '' };
-const priorities = ['Low', 'Medium', 'High', 'Critical'];
+/* ══════════════ CATEGORIES, SLA & ROUTING ══════════════ */
 
+// One category = one office it is routed to = one SLA. They were three separate admin
+// screens before; they are the same decision, so they are edited on one row here.
 export const AdminSetup = () => {
   const toast = useToast();
   const [meta, setMeta] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [officeForm, setOfficeForm] = useState(emptyOffice);
-  const [categoryForm, setCategoryForm] = useState(emptySetupCategory);
-  const [staffForm, setStaffForm] = useState(emptyStaffAccount);
-  const [credentials, setCredentials] = useState([]);
-  const [busy, setBusy] = useState('');
+  const [drafts, setDrafts] = useState({});
+  const [savingId, setSavingId] = useState(null);
+  const [newCategory, setNewCategory] = useState({ name: '', officeId: '', slaDays: 3, defaultPriority: 'High' });
+  const [adding, setAdding] = useState(false);
 
-  const load = async () => {
-    const [metaData, userData] = await Promise.all([endpoints.complaintMeta(), endpoints.users()]);
-    setMeta(metaData);
-    setUsers(userData);
-    const firstOffice = metaData.offices[0]?.id || '';
-    setCategoryForm((current) => ({ ...current, officeId: current.officeId || firstOffice }));
-    setStaffForm((current) => ({ ...current, officeId: current.officeId || firstOffice }));
-  };
+  const load = () => endpoints.complaintMeta().then((data) => {
+    setMeta(data);
+    setDrafts(Object.fromEntries(data.categories.map((category) => {
+      const rule = data.routingRules.find((item) => item.categoryId === category.id);
+      return [category.id, {
+        officeId: rule?.officeId || '',
+        ruleId: rule?.id || null,
+        slaDays: category.slaDays,
+        priority: rule?.priority || category.defaultPriority
+      }];
+    })));
+  }).catch(() => setMeta(null));
 
-  useEffect(() => { load().catch((err) => toast.error(errorMessage(err, 'Could not load setup data'))); }, []);
+  useEffect(() => { load(); }, []);
 
   if (!meta) return <LoadingState />;
 
-  const officeName = (officeId) => meta.offices.find((office) => Number(office.id) === Number(officeId))?.name || 'No office selected';
-  const staffForOffice = (officeId) => users.filter((user) => user.role === 'staff' && user.status === 'active' && Number(user.officeId) === Number(officeId));
-  const rulesForOffice = (officeId) => meta.routingRules.filter((rule) => Number(rule.officeId) === Number(officeId));
-  const ruleForCategory = (categoryId) => meta.routingRules.find((rule) => Number(rule.categoryId) === Number(categoryId));
-  const upsertById = (items, item) => {
-    const exists = items.some((current) => Number(current.id) === Number(item.id));
-    return exists
-      ? items.map((current) => (Number(current.id) === Number(item.id) ? item : current))
-      : [...items, item];
-  };
+  const setDraft = (categoryId, patch) => setDrafts((current) => ({
+    ...current,
+    [categoryId]: { ...current[categoryId], ...patch }
+  }));
 
-  const createOffice = async (event) => {
-    event.preventDefault();
-    setBusy('office');
+  const save = async (category) => {
+    const draft = drafts[category.id];
+    if (!draft.officeId) return toast.error('Choose the office this category is routed to.');
+    setSavingId(category.id);
     try {
-      const office = await endpoints.createOffice(officeForm);
-      setMeta((current) => ({ ...current, offices: upsertById(current.offices, office) }));
-      setCategoryForm((current) => ({ ...current, officeId: current.officeId || office.id }));
-      setStaffForm((current) => ({ ...current, officeId: current.officeId || office.id }));
-      setOfficeForm(emptyOffice);
-      toast.success(`${office.name} department was saved.`);
+      await endpoints.updateComplaintCategory(category.id, {
+        slaDays: Number(draft.slaDays),
+        defaultPriority: draft.priority
+      });
+      if (draft.ruleId) {
+        await endpoints.updateRoutingRule(draft.ruleId, {
+          officeId: Number(draft.officeId),
+          slaDays: Number(draft.slaDays),
+          priority: draft.priority
+        });
+      } else {
+        await endpoints.createRoutingRule({
+          categoryId: category.id,
+          officeId: Number(draft.officeId),
+          slaDays: Number(draft.slaDays),
+          priority: draft.priority
+        });
+      }
+      toast.success(`${category.name} now goes to the office you chose, answered within ${draft.slaDays} days.`);
+      load();
     } catch (err) {
-      toast.error(errorMessage(err, 'Could not create office'));
+      toast.error(errorMessage(err, 'Could not save the rule'));
     } finally {
-      setBusy('');
+      setSavingId(null);
     }
   };
 
-  const createCategoryAndRoute = async (event) => {
-    event.preventDefault();
-    if (!categoryForm.officeId) {
-      toast.error('Choose a responsible department first.');
-      return;
+  const addCategory = async () => {
+    if (!newCategory.name.trim() || !newCategory.officeId) {
+      return toast.error('A new category needs a name and the office it is routed to.');
     }
-    setBusy('category');
+    setAdding(true);
     try {
       const category = await endpoints.createComplaintCategory({
-        name: categoryForm.name,
-        description: categoryForm.description,
-        defaultPriority: categoryForm.defaultPriority,
-        slaDays: Number(categoryForm.slaDays || 3)
+        name: newCategory.name.trim(),
+        slaDays: Number(newCategory.slaDays),
+        defaultPriority: newCategory.defaultPriority
       });
-      const result = await endpoints.createRoutingRule({
+      await endpoints.createRoutingRule({
         categoryId: category.id,
-        officeId: Number(categoryForm.officeId),
-        location: categoryForm.location || 'Kacyiru',
-        priority: categoryForm.defaultPriority,
-        slaDays: Number(categoryForm.slaDays || 3)
+        officeId: Number(newCategory.officeId),
+        slaDays: Number(newCategory.slaDays),
+        priority: newCategory.defaultPriority
       });
-      setMeta((current) => ({
-        ...current,
-        categories: upsertById(current.categories, category),
-        routingRules: result.routingRules
-      }));
-      toast.success(`${category.name} now routes to ${officeName(categoryForm.officeId)}.`);
-      setCategoryForm({ ...emptySetupCategory, officeId: categoryForm.officeId });
+      toast.success(`${category.name} was added and routed.`);
+      setNewCategory({ name: '', officeId: '', slaDays: 3, defaultPriority: 'High' });
+      load();
     } catch (err) {
-      toast.error(errorMessage(err, 'Could not create category'));
+      toast.error(errorMessage(err, 'Could not add the category'));
     } finally {
-      setBusy('');
+      setAdding(false);
     }
   };
 
-  const createStaffAccount = async (event) => {
-    event.preventDefault();
-    if (!staffForm.officeId) {
-      toast.error('Choose the department this official manages.');
-      return;
-    }
-    setBusy('staff');
+  const removeCategory = async (category) => {
     try {
-      const created = await endpoints.createUser({
-        ...staffForm,
-        role: 'staff',
-        officeId: Number(staffForm.officeId),
-        province: 'Kigali City',
-        district: 'Gasabo',
-        sector: 'Kacyiru',
-        status: 'active'
-      });
-      setUsers((items) => [created, ...items]);
-      setCredentials((items) => [{
-        fullName: created.fullName,
-        email: created.email,
-        password: staffForm.password,
-        office: officeName(staffForm.officeId)
-      }, ...items]);
-      toast.success(`${created.fullName} can now manage ${officeName(staffForm.officeId)} complaints.`);
-      setStaffForm({ ...emptyStaffAccount, officeId: staffForm.officeId });
+      await endpoints.deleteComplaintCategory(category.id);
+      toast.success(`${category.name} was deleted.`);
+      load();
     } catch (err) {
-      toast.error(errorMessage(err, 'Could not create user'));
-    } finally {
-      setBusy('');
+      toast.error(errorMessage(err, 'Could not delete the category'));
     }
   };
 
   return (
-    <AdminListPage title="Complaint Setup" subtitle="Build the complaint workflow in this order: department, category, then official account." icon={ClipboardList}>
-      <div className="grid gap-4 xl:grid-cols-3">
-        <SetupStep number="1" title="Create Department" text="Add the office that will solve a type of citizen complaint." />
-        <SetupStep number="2" title="Add Category & Route" text="Create the complaint type citizens will select, then choose the department that receives it." />
-        <SetupStep number="3" title="Create Official Account" text="Create the officer login and connect that officer to one department." />
-      </div>
+    <div style={{ marginTop: 22 }}>
+      <PageTitle
+        title="Categories, SLA & routing"
+        subtitle="Each category is routed to one office and answered within its own number of days. Edit all of it on one row."
+      />
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-3">
-        <form onSubmit={createOffice} className="panel p-5">
-          <h2 className="font-bold text-slate-950">Department / Office</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Use this when the responsible office is not yet in the system. If the office already exists, go straight to step 2.</p>
-          <div className="mt-4 grid gap-3">
-            <Field
-              label="Department name"
-              value={officeForm.name}
-              onChange={(value) => setOfficeForm((form) => ({ ...form, name: value }))}
-              placeholder="Example: Infrastructure, Water and Sanitation Office"
-              hint="This name appears in routing and staff dashboards."
-              required
-            />
-            <Field
-              label="Lead officer"
-              value={officeForm.contactPerson}
-              onChange={(value) => setOfficeForm((form) => ({ ...form, contactPerson: value }))}
-              placeholder="Example: Eric Ndayisenga"
-              hint="The main person citizens and admins see as responsible."
-            />
-            <Field label="Phone" value={officeForm.phone} onChange={(value) => setOfficeForm((form) => ({ ...form, phone: value }))} placeholder="+250 788 300 103" />
-            <Field label="Email" value={officeForm.email} onChange={(value) => setOfficeForm((form) => ({ ...form, email: value }))} placeholder="office@kacyiru.gov.rw" />
-            <button className="btn-primary" disabled={busy === 'office'}><PlusCircle size={16} />{busy === 'office' ? 'Adding...' : 'Add Department'}</button>
-          </div>
-        </form>
+      <div className="card" style={{ marginTop: 18 }}>
+        <div className="cfg-row head">
+          <div>Category</div>
+          <div>Routed to (office)</div>
+          <div>SLA (days)</div>
+          <div>Priority</div>
+          <div />
+        </div>
 
-        <form onSubmit={createCategoryAndRoute} className="panel p-5">
-          <h2 className="font-bold text-slate-950">Complaint Category & Responsibility</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">This is what a citizen chooses when submitting a complaint. The selected department receives every case in this category.</p>
-          <div className="mt-4 grid gap-3">
-            <Field
-              label="Complaint category"
-              value={categoryForm.name}
-              onChange={(value) => setCategoryForm((form) => ({ ...form, name: value }))}
-              placeholder="Example: Citizen Services and Documents"
-              hint="Keep it broad and clear. Citizens should understand it immediately."
-              required
-            />
-            <Field
-              label="Description"
-              value={categoryForm.description}
-              onChange={(value) => setCategoryForm((form) => ({ ...form, description: value }))}
-              placeholder="Example: Certificates, documents, permits, delayed service, and application follow-up."
-              hint="Describe the complaints that belong in this category."
-              required
-            />
-            <label>
-              <span className="label">Responsible department</span>
-              <select className="input" value={categoryForm.officeId} onChange={(event) => setCategoryForm((form) => ({ ...form, officeId: event.target.value }))}>
+        {meta.categories.map((category) => {
+          const draft = drafts[category.id] || {};
+          return (
+            <div className="cfg-row" key={category.id}>
+              <div className="nm">{category.name}</div>
+              <select
+                className="input"
+                value={draft.officeId || ''}
+                onChange={(event) => setDraft(category.id, { officeId: event.target.value })}
+              >
+                <option value="">Choose an office</option>
                 {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
               </select>
-              <p className="mt-1 text-xs text-slate-500">New complaints in this category go directly to this department.</p>
-            </label>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label>
-                <span className="label">Priority</span>
-                <select className="input" value={categoryForm.defaultPriority} onChange={(event) => setCategoryForm((form) => ({ ...form, defaultPriority: event.target.value }))}>
-                  {priorities.map((priority) => <option key={priority}>{priority}</option>)}
-                </select>
-                <p className="mt-1 text-xs text-slate-500">Default urgency for this type of complaint.</p>
-              </label>
-              <Field
-                label="SLA days"
+              <input
+                className="input"
                 type="number"
-                value={categoryForm.slaDays}
-                onChange={(value) => setCategoryForm((form) => ({ ...form, slaDays: Number(value) }))}
-                hint="Number of days the department has to respond."
-                required
+                min="1"
+                value={draft.slaDays ?? ''}
+                onChange={(event) => setDraft(category.id, { slaDays: event.target.value })}
               />
-            </div>
-            <button className="btn-primary" disabled={busy === 'category'}><PlusCircle size={16} />{busy === 'category' ? 'Adding...' : 'Add Category & Route'}</button>
-          </div>
-        </form>
-
-        <form onSubmit={createStaffAccount} className="panel p-5">
-          <h2 className="font-bold text-slate-950">Official Account & Credentials</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Create the login for the officer who works in a department. They will only see complaints assigned to that department.</p>
-          <div className="mt-4 grid gap-3">
-            <Field label="Full name" value={staffForm.fullName} onChange={(value) => setStaffForm((form) => ({ ...form, fullName: value }))} placeholder="Example: Patrick Niyonsenga" required />
-            <Field label="Email" value={staffForm.email} onChange={(value) => setStaffForm((form) => ({ ...form, email: value }))} placeholder="officer@smartcitizen.rw" hint="This is the officer's login email." required />
-            <Field label="Phone" value={staffForm.phone} onChange={(value) => setStaffForm((form) => ({ ...form, phone: value }))} placeholder="+250 788 456 222" />
-            <Field label="Password" value={staffForm.password} onChange={(value) => setStaffForm((form) => ({ ...form, password: value }))} hint="Give this password to the officer. They can use it with the email above." required />
-            <label>
-              <span className="label">Complaint department</span>
-              <select className="input" value={staffForm.officeId} onChange={(event) => setStaffForm((form) => ({ ...form, officeId: event.target.value }))}>
-                {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+              <select
+                className="input"
+                value={draft.priority || 'Medium'}
+                onChange={(event) => setDraft(category.id, { priority: event.target.value })}
+              >
+                {['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}
               </select>
-              <p className="mt-1 text-xs text-slate-500">This controls which complaints the officer can see and respond to.</p>
-            </label>
-            <button className="btn-primary" disabled={busy === 'staff'}><KeyRound size={16} />{busy === 'staff' ? 'Creating...' : 'Create Staff Account'}</button>
-          </div>
-        </form>
+              <div className="cfg-actions">
+                <button type="button" className="btn sm" disabled={savingId === category.id} onClick={() => save(category)}>
+                  {savingId === category.id ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" className="btn red sm" onClick={() => removeCategory(category)}>Delete</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {credentials.length > 0 && (
-        <section className="panel mt-6 p-5">
-          <h2 className="font-bold text-slate-950">New Credentials To Give Officials</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {credentials.map((credential) => (
-              <div key={credential.email} className="rounded-md border border-slate-200 p-3">
-                <p className="font-bold text-slate-900">{credential.fullName}</p>
-                <p className="mt-1 text-sm text-slate-600">{credential.office}</p>
-                <p className="mt-2 text-xs font-semibold text-slate-500">Email: {credential.email}</p>
-                <p className="text-xs font-semibold text-slate-500">Password: {credential.password}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="panel mt-6 overflow-x-auto">
-        <div className="px-5 pt-5">
-          <h2 className="font-bold text-slate-950">Responsibility Map</h2>
-          <p className="mt-1 text-sm text-slate-500">Each category routes to one department. Staff in that department see and respond to those complaints.</p>
+      <div className="card" style={{ marginTop: 14 }}>
+        <p className="card-t">Add a category</p>
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginTop: 12 }}>
+          <input
+            className="input"
+            placeholder="Category name"
+            value={newCategory.name}
+            onChange={(event) => setNewCategory({ ...newCategory, name: event.target.value })}
+          />
+          <select
+            className="input"
+            value={newCategory.officeId}
+            onChange={(event) => setNewCategory({ ...newCategory, officeId: event.target.value })}
+          >
+            <option value="">Choose an office</option>
+            {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+          </select>
+          <input
+            className="input"
+            type="number"
+            min="1"
+            value={newCategory.slaDays}
+            onChange={(event) => setNewCategory({ ...newCategory, slaDays: event.target.value })}
+          />
+          <select
+            className="input"
+            value={newCategory.defaultPriority}
+            onChange={(event) => setNewCategory({ ...newCategory, defaultPriority: event.target.value })}
+          >
+            {['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item}>{item}</option>)}
+          </select>
         </div>
-        <table className="mt-4 w-full min-w-[980px] text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr><th className="px-4 py-3">Complaint Category</th><th className="px-4 py-3">Responsible Department</th><th className="px-4 py-3">Assigned Officials</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">SLA</th></tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {meta.categories.map((category) => {
-              const rule = ruleForCategory(category.id);
-              const officials = staffForOffice(rule?.officeId);
-              return (
-                <tr key={category.id}>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{category.name}</td>
-                  <td className="px-4 py-3 text-slate-600">{officeName(rule?.officeId)}</td>
-                  <td className="px-4 py-3 text-slate-500">{officials.map((official) => `${official.fullName} (${official.email})`).join(', ') || 'No official account yet'}</td>
-                  <td className="px-4 py-3"><StatusBadge value={rule?.priority || category.defaultPriority} /></td>
-                  <td className="px-4 py-3 text-slate-500">{rule?.slaDays || category.slaDays} days</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="mt-6 grid gap-6 xl:grid-cols-2">
-        <div className="panel overflow-x-auto">
-          <div className="px-5 pt-5">
-            <h2 className="font-bold text-slate-950">Departments</h2>
-          </div>
-          <table className="mt-4 w-full min-w-[700px] text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr><th className="px-4 py-3">Department</th><th className="px-4 py-3">Lead</th><th className="px-4 py-3">Categories</th><th className="px-4 py-3">Staff</th></tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {meta.offices.map((office) => (
-                <tr key={office.id}>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{office.name}</td>
-                  <td className="px-4 py-3 text-slate-500">{office.contactPerson || 'Not assigned'}</td>
-                  <td className="px-4 py-3 text-slate-500">{rulesForOffice(office.id).length}</td>
-                  <td className="px-4 py-3 text-slate-500">{staffForOffice(office.id).length}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="panel overflow-x-auto">
-          <div className="px-5 pt-5">
-            <h2 className="font-bold text-slate-950">Official Accounts</h2>
-          </div>
-          <table className="mt-4 w-full min-w-[760px] text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr><th className="px-4 py-3">Official</th><th className="px-4 py-3">Login Email</th><th className="px-4 py-3">Department</th><th className="px-4 py-3">Status</th></tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {users.filter((user) => user.role === 'staff').map((staff) => (
-                <tr key={staff.id}>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{staff.fullName}</td>
-                  <td className="px-4 py-3 text-slate-500">{staff.email}</td>
-                  <td className="px-4 py-3 text-slate-500">{officeName(staff.officeId)}</td>
-                  <td className="px-4 py-3"><StatusBadge value={staff.status || 'active'} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </AdminListPage>
+        <button type="button" className="btn sm" style={{ marginTop: 12 }} disabled={adding} onClick={addCategory}>
+          {adding ? 'Adding…' : '+ Add category'}
+        </button>
+      </div>
+    </div>
   );
 };
+
+/* ══════════════ USERS & ROLES ══════════════ */
+
+const emptyUser = { fullName: '', email: '', password: 'password', role: 'staff', officeId: '', phone: '', nationalId: '' };
 
 export const AdminUsers = () => {
   const toast = useToast();
-  const { user: currentUser } = useAuth();
-  const [users, setUsers] = useState([]);
+  const { user: me } = useAuth();
+  const [users, setUsers] = useState(null);
   const [offices, setOffices] = useState([]);
   const [form, setForm] = useState(emptyUser);
-  const [creating, setCreating] = useState(false);
-  const [busyId, setBusyId] = useState(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const load = () => endpoints.users().then(setUsers);
+  const load = () => endpoints.users().then(setUsers).catch(() => setUsers([]));
   useEffect(() => {
     load();
-    endpoints.complaintMeta().then((meta) => setOffices(meta.offices || []));
+    endpoints.complaintMeta().then((meta) => setOffices(meta.offices)).catch(() => {});
   }, []);
 
-  const updateUser = async (id, patch) => {
-    setBusyId(id);
-    try {
-      const updated = await endpoints.updateUser(id, patch);
-      setUsers((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-      toast.success('User updated.');
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not update user'));
-    } finally {
-      setBusyId(null);
-    }
-  };
+  if (!users) return <LoadingState />;
 
-  // A staff account with no office can open no cases, so promoting someone to staff
-  // must carry an office with it.
-  const changeRole = (user, role) => updateUser(user.id, {
-    role,
-    ...(role === 'staff' && !user.officeId ? { officeId: offices[0]?.id } : {})
-  });
-
-  const createUser = async (event) => {
-    event.preventDefault();
-    setCreating(true);
+  const add = async () => {
+    if (!form.fullName.trim() || !form.email.trim()) return toast.error('A new user needs a name and an email.');
+    if (form.role === 'staff' && !form.officeId) return toast.error('An Administrative Staff account must belong to an office.');
+    if (form.role === 'citizen' && form.nationalId.length !== 16) return toast.error('The National ID must be 16 digits.');
+    setSaving(true);
     try {
-      const created = await endpoints.createUser(form);
-      setUsers((items) => [created, ...items]);
+      await endpoints.createUser({
+        ...form,
+        officeId: form.role === 'staff' ? Number(form.officeId) : null
+      });
+      toast.success(`${form.fullName} can now log in.`);
       setForm(emptyUser);
-      toast.success(`${created.fullName} was added as ${created.role}.`);
+      setAddOpen(false);
+      load();
     } catch (err) {
-      toast.error(errorMessage(err, 'Could not create user'));
+      toast.error(errorMessage(err, 'Could not create the user'));
     } finally {
-      setCreating(false);
+      setSaving(false);
     }
   };
 
-  const removeUser = async (targetUser) => {
-    if (!window.confirm(`Delete ${targetUser.fullName}? This cannot be undone.`)) return;
-    setBusyId(targetUser.id);
+  const setStatus = async (user, status) => {
     try {
-      await endpoints.deleteUser(targetUser.id);
-      setUsers((items) => items.filter((item) => item.id !== targetUser.id));
-      toast.success(`${targetUser.fullName} was deleted.`);
+      await endpoints.updateUser(user.id, { status });
+      toast.success(`${user.fullName} is now ${status}.`);
+      load();
     } catch (err) {
-      toast.error(errorMessage(err, 'Could not delete user'));
-    } finally {
-      setBusyId(null);
+      toast.error(errorMessage(err, 'Could not update the user'));
+    }
+  };
+
+  const remove = async (user) => {
+    try {
+      await endpoints.deleteUser(user.id);
+      toast.success(`${user.fullName} was deleted.`);
+      load();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete the user'));
     }
   };
 
   return (
-    <AdminListPage title="Users & Roles" subtitle="Manage the three SCFCMS roles: Citizen, Administrative Staff, and Admin." icon={Users}>
-      <form onSubmit={createUser} className="panel mb-6 grid gap-3 p-5 md:grid-cols-6">
-        <Field label="Full name" value={form.fullName} onChange={(value) => setForm((f) => ({ ...f, fullName: value }))} />
-        <Field label="Email" value={form.email} onChange={(value) => setForm((f) => ({ ...f, email: value }))} />
-        <Field label="Phone" value={form.phone} onChange={(value) => setForm((f) => ({ ...f, phone: value }))} />
-        <Field label="Password" type="password" value={form.password} onChange={(value) => setForm((f) => ({ ...f, password: value }))} />
-        <label>
-          <span className="label">Role</span>
-          <select
-            className="input"
-            value={form.role}
-            onChange={(event) => {
-              const role = event.target.value;
-              setForm((f) => ({ ...f, role, officeId: role === 'staff' ? (f.officeId || offices[0]?.id || '') : '' }));
-            }}
-          >
-            <option value="citizen">Citizen</option>
-            <option value="staff">Administrative Staff</option>
-            <option value="admin">Admin</option>
-          </select>
-        </label>
-        {form.role === 'staff' && (
-          <label>
-            <span className="label">Responsible office</span>
-            <select className="input" value={form.officeId} onChange={(event) => setForm((f) => ({ ...f, officeId: Number(event.target.value) }))} required>
-              <option value="">Select office</option>
-              {offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-            </select>
-          </label>
-        )}
-        <div className="flex items-end">
-          <button className="btn-primary w-full" disabled={creating}><PlusCircle size={16} />{creating ? 'Adding...' : 'Add User'}</button>
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="Users & roles" subtitle="Citizens submit, staff answer for one office, admins set the rules." />
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <p className="card-t">Accounts</p>
+          <button type="button" className="btn sm" onClick={() => setAddOpen((open) => !open)}>
+            {addOpen ? 'Cancel' : '+ Add user'}
+          </button>
         </div>
-      </form>
-      <Table headers={['Name', 'Email', 'Role', 'Office', 'Location', 'Status', '']}>
-        {users.map((user) => (
-          <tr key={user.id}>
-            <td className="px-4 py-3 font-semibold text-slate-900">{user.fullName}</td>
-            <td className="px-4 py-3 text-slate-500">{user.email}</td>
-            <td className="px-4 py-3">
-              <select className="input min-w-44" value={user.role} disabled={busyId === user.id} onChange={(event) => changeRole(user, event.target.value)}>
-                <option value="citizen">Citizen</option>
-                <option value="staff">Administrative Staff</option>
-                <option value="admin">Admin</option>
+
+        {addOpen && (
+          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginTop: 14 }}>
+            <input className="input" placeholder="Full name" value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} />
+            <input className="input" type="email" placeholder="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
+            <input className="input" placeholder="Phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
+            <input className="input" placeholder="Password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+            <select className="input" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value, officeId: '' })}>
+              <option value="citizen">Citizen</option>
+              <option value="staff">Administrative Staff</option>
+              <option value="admin">Admin</option>
+            </select>
+            {/* A citizen account is tied to a real resident by their ID; staff and admin are
+                office roles, so the field only appears where it is actually required. */}
+            {form.role === 'citizen' && (
+              <input
+                className="input"
+                inputMode="numeric"
+                placeholder="National ID (16 digits)"
+                value={form.nationalId}
+                onChange={(event) => setForm({ ...form, nationalId: event.target.value.replace(/\D/g, '').slice(0, 16) })}
+              />
+            )}
+            {form.role === 'staff' && (
+              <select className="input" value={form.officeId} onChange={(event) => setForm({ ...form, officeId: event.target.value })}>
+                <option value="">Choose an office</option>
+                {offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
               </select>
-            </td>
-            <td className="px-4 py-3">
-              {user.role === 'staff' ? (
-                <select className="input min-w-48" value={user.officeId || ''} disabled={busyId === user.id} onChange={(event) => updateUser(user.id, { officeId: Number(event.target.value) })}>
-                  {offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-                </select>
-              ) : (
-                <span className="text-slate-400">—</span>
-              )}
-            </td>
-            <td className="px-4 py-3 text-slate-500">{user.district}</td>
-            <td className="px-4 py-3">
-              <select className="input min-w-32" value={user.status || 'active'} disabled={busyId === user.id} onChange={(event) => updateUser(user.id, { status: event.target.value })}>
-                <option value="active">active</option>
-                <option value="suspended">suspended</option>
-                <option value="pending">pending</option>
-              </select>
-            </td>
-            <td className="px-4 py-3">
-              {user.id !== currentUser?.id && (
-                <button className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50" disabled={busyId === user.id} onClick={() => removeUser(user)} aria-label={`Delete ${user.fullName}`}>
-                  <Trash2 size={15} />
-                </button>
-              )}
-            </td>
-          </tr>
-        ))}
-      </Table>
-    </AdminListPage>
+            )}
+            <button type="button" className="btn sm" style={{ gridColumn: '1 / -1' }} disabled={saving} onClick={add}>
+              {saving ? 'Saving…' : 'Save user'}
+            </button>
+          </div>
+        )}
+
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Office</th>
+                <th>Status</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td style={{ fontWeight: 600 }}>{user.fullName}</td>
+                  <td style={{ fontSize: 12.5 }}>{user.email}</td>
+                  <td><Badge value={user.role} /></td>
+                  <td style={{ fontSize: 12.5, color: 'var(--muted)' }}>{user.office?.name || '—'}</td>
+                  <td><Badge value={user.status} /></td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {user.id !== me?.id && (
+                        <button
+                          type="button"
+                          className="btn ghost sm"
+                          onClick={() => setStatus(user, user.status === 'active' ? 'suspended' : 'active')}
+                        >
+                          {user.status === 'active' ? 'Suspend' : 'Activate'}
+                        </button>
+                      )}
+                      {user.id !== me?.id && (
+                        <button type="button" className="btn red sm" onClick={() => remove(user)}>Delete</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 };
+
+/* ══════════════ AUDIT LOG ══════════════ */
 
 export const AdminAuditLogs = () => {
-  const [logs, setLogs] = useState([]);
-  useEffect(() => { endpoints.complaintAuditLogs().then(setLogs); }, []);
+  const [logs, setLogs] = useState(null);
+
+  useEffect(() => { endpoints.complaintAuditLogs().then(setLogs).catch(() => setLogs([])); }, []);
+
+  if (!logs) return <LoadingState />;
+
   return (
-    <AdminListPage title="Audit Logs" subtitle="Review complaint submissions, assignments, responses, escalations, closures, and citizen ratings." icon={FileText}>
-      <Table headers={['Actor', 'Action', 'Date']}>
-        {logs.map((log) => (
-          <tr key={log.id}>
-            <td className="px-4 py-3 font-semibold text-slate-900">{log.actor}</td>
-            <td className="px-4 py-3 text-slate-600">{log.action}</td>
-            <td className="px-4 py-3 text-slate-500">{new Date(log.createdAt).toLocaleString()}</td>
-          </tr>
-        ))}
-      </Table>
-    </AdminListPage>
-  );
-};
-
-export const AdminSettings = () => (
-  <AdminListPage title="System Security" subtitle="Ensure secure login, role-based access, complaint audit trail, and protected complaint records." icon={Settings}>
-    <div className="grid gap-4 md:grid-cols-2">
-      {[
-        ['Secure Login and Logout', 'Only registered users can enter their role dashboard. JSON Web Tokens expire after 7 days.'],
-        ['Role-Based Access', 'Citizen, Administrative Staff, and Admin each see only their required functions, enforced on both the interface and the API.'],
-        ['Audit Logs', 'Important complaint, routing, escalation, and rating actions are recorded with actor, action, and timestamp.'],
-        ['Data Protection', 'Complaint records use tracking numbers, ownership checks restrict citizen access to their own cases, and uploaded evidence is stored under a controlled path.']
-      ].map(([title, text]) => (
-        <article key={title} className="card p-4">
-          <StatusBadge value="Enabled" />
-          <h2 className="mt-3 font-bold text-slate-950">{title}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">{text}</p>
-        </article>
-      ))}
-    </div>
-  </AdminListPage>
-);
-
-const AdminListPage = ({ title, subtitle, icon: Icon, children, actions = null }) => (
-  <div>
-    <PageHeader title={title} subtitle={subtitle} actions={actions} />
-    {children}
-  </div>
-);
-
-const SetupStep = ({ number, title, text }) => (
-  <article className="rounded-lg border border-violet-100 bg-violet-50 p-4">
-    <span className="grid h-8 w-8 place-items-center rounded-full bg-violet-700 text-sm font-bold text-white">{number}</span>
-    <h2 className="mt-3 font-bold text-slate-950">{title}</h2>
-    <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
-  </article>
-);
-
-const Table = ({ headers, children }) => (
-  <section className="panel overflow-x-auto">
-    <table className="w-full min-w-[900px] text-left text-sm">
-      <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr>{headers.map((header) => <th key={header} className="px-4 py-3">{header}</th>)}</tr></thead>
-      <tbody className="divide-y divide-slate-100">{children}</tbody>
-    </table>
-  </section>
-);
-
-const Field = ({ label, value, onChange, type = 'text', placeholder = '', hint = '', required = false }) => (
-  <label>
-    <span className="label">{label}{required && <span className="text-red-500"> *</span>}</span>
-    <input className="input" type={type} value={value} placeholder={placeholder} required={required} onChange={(event) => onChange(event.target.value)} />
-    {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
-  </label>
-);
-
-const AdminStat = ({ label, value, color }) => (
-  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-    <p className="text-xs font-semibold text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold text-slate-950">{value}</p>
-    <span className={`mt-3 block h-1.5 rounded-full ${color}`} />
-  </div>
-);
-
-const AdminRows = ({ data = [], color = 'bg-violet-700' }) => {
-  const max = Math.max(1, ...data.map((item) => Number(item.value || 0)));
-  return (
-    <div className="mt-3 space-y-3">
-      {data.map((item) => (
-        <div key={item.name}>
-          <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-            <span className="font-semibold text-slate-700">{item.name}</span>
-            <span className="text-slate-500">{item.value}</span>
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="Audit log" subtitle="Every action taken in the system, in order, with who did it." />
+      {logs.length === 0
+        ? <Empty title="Nothing has been recorded yet" subtitle="Actions appear here as soon as they happen." />
+        : (
+          <div className="card" style={{ marginTop: 18 }}>
+            {logs.map((log) => (
+              <div key={log.id} className="notif">
+                <span className="notif-ico" aria-hidden="true">📝</span>
+                <span>
+                  <span style={{ fontSize: 14, fontWeight: 600, display: 'block' }}>{log.action}</span>
+                  <small className="hint">{log.actor} · {formatDateTime(log.createdAt)}</small>
+                </span>
+              </div>
+            ))}
           </div>
-          <div className="h-2 rounded-full bg-slate-100">
-            <div className={`h-2 rounded-full ${color}`} style={{ width: `${Math.max(8, (Number(item.value || 0) / max) * 100)}%` }} />
-          </div>
-        </div>
-      ))}
+        )}
     </div>
   );
 };
-
-const HealthRow = ({ label, value }) => (
-  <div className="flex items-center justify-between gap-3 rounded-md bg-slate-50 p-3">
-    <span className="font-semibold text-slate-600">{label}</span>
-    <span className="font-bold text-emerald-700">{value}</span>
-  </div>
-);
-
-const ReportLink = ({ to, label }) => (
-  <Link to={to} className="rounded-md border border-violet-100 bg-violet-50 px-3 py-2 text-center text-xs font-bold text-violet-700 hover:border-violet-300 hover:bg-violet-100">
-    {label}
-  </Link>
-);

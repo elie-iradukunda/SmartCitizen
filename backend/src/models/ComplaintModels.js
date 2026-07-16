@@ -18,7 +18,9 @@ export const defineOffice = (sequelize) => sequelize.define('Office', {
   contactPerson: DataTypes.STRING(160),
   phone: DataTypes.STRING(40),
   email: DataTypes.STRING(190),
-  active: { type: DataTypes.BOOLEAN, defaultValue: true }
+  active: { type: DataTypes.BOOLEAN, defaultValue: true },
+  // The office every overdue or low-rated complaint is escalated to.
+  isSectorExecutive: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
 
 export const defineRoutingRule = (sequelize) => sequelize.define('RoutingRule', {
@@ -34,6 +36,8 @@ export const defineRoutingRule = (sequelize) => sequelize.define('RoutingRule', 
 
 export const defineComplaint = (sequelize) => sequelize.define('Complaint', {
   trackingNumber: { type: DataTypes.STRING(40), allowNull: false, unique: true },
+  // An anonymous complaint has no citizenId, so misconduct can be reported without fear.
+  isAnonymous: { type: DataTypes.BOOLEAN, defaultValue: false },
   citizenName: { type: DataTypes.STRING(160), allowNull: false },
   citizenPhone: DataTypes.STRING(40),
   description: { type: DataTypes.TEXT, allowNull: false },
@@ -60,8 +64,24 @@ export const defineComplaint = (sequelize) => sequelize.define('Complaint', {
   voiceNotePath: DataTypes.STRING(255),
   voiceNoteType: DataTypes.STRING(40),
   dueDate: DataTypes.DATEONLY,
+  // Set the moment the assigned office answers for the first time. Until then the citizen
+  // has nobody to talk to, so the chat stays shut.
+  chatOpenedAt: DataTypes.DATE,
+  // Set when the citizen asks the Sector Executive for help, so the same case cannot be
+  // pushed upstairs twice.
+  escalationRequestedAt: DataTypes.DATE,
   resolvedAt: DataTypes.DATE,
   closedAt: DataTypes.DATE
+});
+
+// The private conversation between one citizen and the office holding their case. Separate
+// from ComplaintResponse: that table is the official status trail, this one is people talking.
+export const defineComplaintMessage = (sequelize) => sequelize.define('ComplaintMessage', {
+  senderName: { type: DataTypes.STRING(180), allowNull: false },
+  senderRole: { type: DataTypes.ENUM('citizen', 'staff', 'admin'), allowNull: false },
+  body: { type: DataTypes.TEXT, allowNull: false },
+  readByCitizen: { type: DataTypes.BOOLEAN, defaultValue: false },
+  readByOffice: { type: DataTypes.BOOLEAN, defaultValue: false }
 });
 
 export const defineComplaintResponse = (sequelize) => sequelize.define('ComplaintResponse', {
@@ -76,6 +96,9 @@ export const defineComplaintResponse = (sequelize) => sequelize.define('Complain
 export const defineSatisfactionRating = (sequelize) => sequelize.define('SatisfactionRating', {
   score: { type: DataTypes.INTEGER, allowNull: false },
   comment: DataTypes.TEXT,
+  // Feedback on a finished case is published so the sector can be held to its record. A
+  // citizen who would rather not be named can opt out without losing the rating itself.
+  isPublic: { type: DataTypes.BOOLEAN, defaultValue: true },
   ratedAt: { type: DataTypes.DATE, defaultValue: DataTypes.NOW }
 });
 

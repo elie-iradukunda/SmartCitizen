@@ -1,44 +1,66 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, CheckCircle2, FileText, ListChecks, Mic, Paperclip, PlusCircle, Send, Square, Star, Trash2, UploadCloud } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
+import { Mic, Square, Trash2 } from 'lucide-react';
 import { API_ORIGIN, endpoints } from '../../api/client.js';
-import { CategoryDonut } from '../../components/Charts.jsx';
 import { LoadingState } from '../../components/LoadingState.jsx';
-import { PageHeader } from '../../components/PageHeader.jsx';
-import { StatCard } from '../../components/StatCard.jsx';
-import { StatusBadge } from '../../components/StatusBadge.jsx';
-import { useToast, errorMessage } from '../../context/ToastContext.jsx';
+import {
+  Badge,
+  Bar,
+  Empty,
+  PageTitle,
+  Stat,
+  Timeline,
+  formatDate,
+  formatDateTime,
+  isOverdue,
+  isTerminal
+} from '../../components/Ui.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
-import { kacyiruDefaults, kacyiruLocation, villagesForCell } from '../../data/kacyiruLocations.js';
+import { useToast, errorMessage } from '../../context/ToastContext.jsx';
+import { kacyiruLocation, villagesForCell } from '../../data/kacyiruLocations.js';
 
-const defaultComplaint = {
-  type: '',
-  description: '',
-  citizenPhone: '',
-  evidenceLink: '',
-  ...kacyiruDefaults
+const SECTOR_OFFICE = 'Sector Executive Office';
+const maxEvidenceBytes = 100 * 1024 * 1024;
+
+// The citizen writes in their own words; these keywords pick the category for them.
+// Kinyarwanda and English both matter here, because a citizen types in whichever comes first.
+const categoryKeywords = {
+  'infrastructure-sanitation': ['amazi', 'imyanda', 'umuhanda', 'isuku', 'imiyoboro', 'itara', 'amashanyarazi', 'ikiraro', 'water', 'road', 'waste', 'drainage', 'street light', 'sanitation', 'electricity', 'garbage'],
+  'land-housing-construction': ['ubutaka', 'inzu', 'imiturire', 'ikibanza', 'umupaka', 'imbibi', 'impapuro z ubutaka', 'land', 'plot', 'housing', 'construction', 'permit', 'boundary', 'property'],
+  'community-safety-health': ['umutekano', 'ubuzima', 'ivuriro', 'indwara', 'urugomo', 'abajura', 'ubwoba', 'safety', 'health', 'security', 'clinic', 'disease', 'violence', 'theft'],
+  'governance-accountability': ['ruswa', 'uburiganya', 'akarengane', 'umuyobozi', 'kunyereza', 'corruption', 'bribe', 'misconduct', 'unfair', 'abuse', 'complaint about staff'],
+  'citizen-services': ['icyangombwa', 'impapuro', 'serivisi', 'uruhushya', 'document', 'certificate', 'service', 'application', 'delay', 'front desk']
 };
 
-const formatDate = (value) => (value ? new Date(value).toLocaleString() : 'Not set');
-const todayIso = () => new Date().toISOString().slice(0, 10);
-const terminalStatuses = ['Resolved', 'Closed'];
-const activeStatuses = ['Assigned', 'In Review', 'Waiting for Citizen', 'Escalated'];
-const staffStatusOptions = ['Assigned', 'In Review', 'Waiting for Citizen', 'Resolved', 'Closed'];
-const priorityOptions = ['Low', 'Medium', 'High', 'Critical'];
-const isTerminal = (complaint) => terminalStatuses.includes(complaint.status);
-const isOverdue = (complaint) => !isTerminal(complaint) && complaint.dueDate && complaint.dueDate < todayIso();
-const maxEvidenceBytes = 100 * 1024 * 1024;
+const detectCategory = (text, categories = []) => {
+  const value = String(text || '').toLowerCase();
+  if (!value.trim()) return null;
+  const match = Object.entries(categoryKeywords)
+    .find(([, words]) => words.some((word) => value.includes(word)));
+  const code = match?.[0] || 'citizen-services';
+  return categories.find((category) => category.code === code) || categories[0] || null;
+};
+
+// The response trail the backend already records IS the case history, so we render it directly.
+const timelineOf = (complaint) => (complaint.responses || []).map((response) => ({
+  title: response.responseText,
+  when: `${response.responder} · ${formatDateTime(response.createdAt)}`,
+  done: true
+}));
+
 const formatFileSize = (bytes = 0) => {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${bytes} B`;
 };
+
 const audioExtensionFromMime = (mime = '') => {
   if (mime.includes('mp4')) return 'm4a';
   if (mime.includes('ogg')) return 'ogg';
   if (mime.includes('wav')) return 'wav';
   return 'webm';
 };
+
 const supportedAudioMimeType = () => [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -46,29 +68,173 @@ const supportedAudioMimeType = () => [
   'audio/ogg;codecs=opus'
 ].find((type) => window.MediaRecorder?.isTypeSupported?.(type));
 
+const EvidenceLinks = ({ complaint }) => {
+  const hasAttachment = Boolean(complaint.attachmentPath);
+  const hasVoiceNote = Boolean(complaint.voiceNotePath);
+  const hasLink = Boolean(complaint.evidenceLink);
+  if (!hasAttachment && !hasVoiceNote && !hasLink) return null;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {hasVoiceNote && (
+        <div>
+          <small className="hint">Voice complaint recorded by the citizen</small>
+          <audio className="w-full" style={{ width: '100%', marginTop: 4 }} controls src={`${API_ORIGIN}${complaint.voiceNotePath}`} />
+        </div>
+      )}
+      <div className="row-actions" style={{ marginTop: 8 }}>
+        {hasAttachment && (
+          <a className="btn ghost sm" href={`${API_ORIGIN}${complaint.attachmentPath}`} target="_blank" rel="noreferrer">
+            📎 {complaint.attachmentName || 'Open evidence'}
+          </a>
+        )}
+        {hasLink && (
+          <a className="btn ghost sm" href={complaint.evidenceLink} target="_blank" rel="noreferrer">
+            🔗 Open evidence link
+          </a>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ══════════════ SHARED: PRIVATE CASE CHAT ══════════════ */
+
+// The private conversation on one case. It only exists once the assigned office has
+// answered, so a citizen is never left typing into a room nobody is assigned to read.
+const ComplaintChat = ({ complaint, onChange, readOnly = false }) => {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [messages, setMessages] = useState(complaint.messages || []);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const endRef = useRef(null);
+
+  const isCitizen = user?.role === 'citizen';
+  const closed = complaint.status === 'Closed';
+
+  // Opening the thread is what marks it read, so the badge clears for whoever is looking.
+  useEffect(() => {
+    if (!complaint.chatOpen || complaint.chatRedacted) return;
+    let active = true;
+    endpoints.complaintMessages(complaint.trackingNumber)
+      .then((fresh) => { if (active) setMessages(fresh.messages || []); })
+      .catch(() => { /* the copy we were handed still renders */ });
+    return () => { active = false; };
+  }, [complaint.trackingNumber, complaint.messageCount]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [messages.length]);
+
+  if (complaint.chatRedacted) {
+    return (
+      <div className="chat-shell">
+        <p className="chat-locked">
+          This conversation is private to the citizen and the department handling the case.
+        </p>
+      </div>
+    );
+  }
+
+  if (!complaint.chatOpen) {
+    return (
+      <div className="chat-shell">
+        <p className="chat-locked">
+          {isCitizen
+            ? 'The conversation opens as soon as the assigned office replies to your complaint.'
+            : 'Reply to this complaint to open the conversation with the citizen.'}
+        </p>
+      </div>
+    );
+  }
+
+  const send = async (event) => {
+    event.preventDefault();
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      const updated = await endpoints.sendComplaintMessage(complaint.trackingNumber, body);
+      setMessages(updated.messages || []);
+      setDraft('');
+      onChange?.();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not send your message'));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="chat-shell">
+      <div className="chat-log">
+        {messages.length === 0
+          ? <p className="chat-locked">No messages yet.</p>
+          : messages.map((message) => (
+            <div key={message.id} className={`chat-msg ${message.mine ? 'mine' : 'theirs'}`}>
+              <div className="chat-bubble">
+                <small className="chat-who">
+                  {message.senderName}{message.senderRole !== 'citizen' ? ' · Office' : ''}
+                </small>
+                <p>{message.body}</p>
+                <small className="chat-when">{formatDateTime(message.createdAt)}</small>
+              </div>
+            </div>
+          ))}
+        <div ref={endRef} />
+      </div>
+
+      {closed
+        ? <p className="chat-locked">This complaint is closed. The conversation is read-only.</p>
+        : readOnly
+          ? <p className="chat-locked">Only the department handling this case can reply.</p>
+          : (
+            <form className="chat-form" onSubmit={send}>
+              <input
+                className="input"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                placeholder="Write a message…"
+                maxLength={2000}
+                disabled={sending}
+              />
+              <button type="submit" className="btn sm" disabled={sending || !draft.trim()}>
+                {sending ? 'Sending…' : 'Send'}
+              </button>
+            </form>
+          )}
+    </div>
+  );
+};
+
+/* ══════════════ CITIZEN: SUBMIT ══════════════ */
+
 export const SubmitComplaint = () => {
   const { user } = useAuth();
   const toast = useToast();
-  const navigate = useNavigate();
-  const [form, setForm] = useState({
-    ...defaultComplaint,
-    citizenPhone: user?.phone || '',
-    cell: user?.cell || defaultComplaint.cell,
-    village: user?.village || defaultComplaint.village
-  });
-  const [file, setFile] = useState(null);
   const [meta, setMeta] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(null);
+  const [description, setDescription] = useState('');
+  const [pickedCategoryId, setPickedCategoryId] = useState(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [cell, setCell] = useState(user?.cell || kacyiruLocation.cells[0].name);
+  const [village, setVillage] = useState(user?.village || villagesForCell(user?.cell || kacyiruLocation.cells[0].name)[0] || '');
+  const [phone, setPhone] = useState(user?.phone || '');
+  const [file, setFile] = useState(null);
+  const [evidenceLink, setEvidenceLink] = useState('');
   const [voiceNote, setVoiceNote] = useState(null);
   const [voiceNoteUrl, setVoiceNoteUrl] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(null);
+
   const mediaRecorderRef = useRef(null);
   const recordingStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
   const voiceNoteUrlRef = useRef('');
 
-  useEffect(() => { endpoints.complaintMeta().then(setMeta); }, []);
+  useEffect(() => { endpoints.complaintMeta().then(setMeta).catch(() => {}); }, []);
 
   useEffect(() => () => {
     if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
@@ -76,12 +242,10 @@ export const SubmitComplaint = () => {
     if (voiceNoteUrlRef.current) URL.revokeObjectURL(voiceNoteUrlRef.current);
   }, []);
 
-  const update = (field, value) => setForm((current) => {
-    if (field === 'cell') {
-      return { ...current, cell: value, village: villagesForCell(value)[0] || '' };
-    }
-    return { ...current, [field]: value };
-  });
+  const categories = meta?.categories || [];
+  const detected = useMemo(() => detectCategory(description, categories), [description, categories]);
+  const category = categories.find((item) => item.id === pickedCategoryId) || detected;
+  const office = meta?.routingRules?.find((rule) => rule.categoryId === category?.id)?.office;
 
   const removeVoiceNote = () => {
     if (voiceNoteUrlRef.current) URL.revokeObjectURL(voiceNoteUrlRef.current);
@@ -90,17 +254,9 @@ export const SubmitComplaint = () => {
     setVoiceNoteUrl('');
   };
 
-  const saveVoicePreview = (blob) => {
-    removeVoiceNote();
-    const url = URL.createObjectURL(blob);
-    voiceNoteUrlRef.current = url;
-    setVoiceNote(blob);
-    setVoiceNoteUrl(url);
-  };
-
-  const startVoiceRecording = async () => {
+  const startRecording = async () => {
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      toast.error('Voice recording is not supported in this browser.');
+      toast.error('Voice recording is not supported in this browser. Please type instead.');
       return;
     }
     try {
@@ -119,8 +275,11 @@ export const SubmitComplaint = () => {
         recordingStreamRef.current = null;
         setRecording(false);
         if (blob.size > 0) {
-          saveVoicePreview(blob);
-          toast.success('Voice recording saved. You can play it before submitting.');
+          const url = URL.createObjectURL(blob);
+          voiceNoteUrlRef.current = url;
+          setVoiceNote(blob);
+          setVoiceNoteUrl(url);
+          toast.success('Voice recording saved. Play it back before you submit.');
         }
       };
       recorder.onerror = () => {
@@ -132,1420 +291,1127 @@ export const SubmitComplaint = () => {
       mediaRecorderRef.current = recorder;
       recorder.start();
       setRecording(true);
-    } catch (err) {
+    } catch {
       setRecording(false);
       toast.error('Microphone permission was not granted.');
     }
   };
 
-  const stopVoiceRecording = () => {
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    } else {
-      setRecording(false);
-    }
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop();
+    else setRecording(false);
   };
 
-  const handleEvidenceFile = (event) => {
+  const pickFile = (event) => {
     const selected = event.target.files?.[0] || null;
-    setUploadProgress(null);
+    setUploadPercent(null);
     if (selected && selected.size > maxEvidenceBytes) {
       event.target.value = '';
       setFile(null);
-      toast.error(`This file is ${formatFileSize(selected.size)}. Upload maximum is 100 MB. Paste a public video/evidence link instead.`);
+      toast.error(`This file is ${formatFileSize(selected.size)}. The maximum upload is 100 MB. Paste a public evidence link instead.`);
       return;
     }
     setFile(selected);
   };
 
-  const updateUploadProgress = (event, estimatedTotal) => {
-    const total = event.total || estimatedTotal || 0;
-    const loaded = event.loaded || 0;
-    const percent = total ? Math.min(99, Math.round((loaded / total) * 100)) : 0;
-    setUploadProgress({ loaded, total, percent });
+  const reset = () => {
+    setDescription('');
+    setPickedCategoryId(null);
+    setFile(null);
+    setEvidenceLink('');
+    removeVoiceNote();
+    setUploadPercent(null);
+    setSubmitted(null);
   };
 
   const submit = async (event) => {
     event.preventDefault();
-    if (recording) {
-      toast.error('Stop the voice recording before submitting.');
-      return;
+    if (recording) return toast.error('Stop the voice recording before submitting.');
+    if (!description.trim() && !voiceNote && !file && !evidenceLink.trim()) {
+      return toast.error('Describe the problem, record a voice complaint, or attach evidence.');
     }
-    if (file && file.size > maxEvidenceBytes) {
-      toast.error('Upload maximum is 100 MB. Paste a public video/evidence link instead.');
-      return;
-    }
-    if (!form.description.trim() && !form.evidenceLink.trim() && !voiceNote && !file) {
-      toast.error('Type a description, record a voice complaint, upload evidence, or paste an evidence link.');
-      return;
-    }
+    if (!category) return toast.error('Complaint categories are still loading. Try again in a moment.');
+
     setSaving(true);
     try {
-      const location = [form.sector, form.district, form.province].filter(Boolean).join(', ');
-      const hasVideoEvidence = file?.type?.startsWith('video/');
-      const hasAudioEvidence = file?.type?.startsWith('audio/');
-      const submissionMode = voiceNote && hasVideoEvidence
-        ? 'Voice Recording + Video Evidence'
-        : voiceNote
-          ? 'Voice Recording'
-          : hasVideoEvidence
-            ? 'Video Evidence'
-            : hasAudioEvidence
-              ? 'Audio Evidence'
-              : file && form.evidenceLink.trim()
-                ? 'Evidence Upload + Link'
-                : file
-                ? 'Evidence Upload'
-                : form.evidenceLink.trim()
-                  ? 'Evidence Link'
-                : 'Typed form';
-      const channel = voiceNote ? 'Voice Recording' : 'Web Portal';
-      const payload = { ...form, location, submissionMode, channel };
+      const payload = {
+        type: category.name,
+        categoryId: category.id,
+        description: description.trim(),
+        citizenPhone: phone,
+        cell,
+        village,
+        evidenceLink: evidenceLink.trim(),
+        location: [user?.sector || 'Kacyiru', user?.district || 'Gasabo', user?.province || 'Kigali City'].join(', '),
+        channel: voiceNote ? 'Voice Recording' : 'Web Portal',
+        submissionMode: voiceNote ? 'Voice Recording' : file ? 'Evidence Upload' : 'Typed form'
+      };
+
       let complaint;
       if (file || voiceNote) {
-        const estimatedUploadSize = (file?.size || 0) + (voiceNote?.size || 0);
-        setUploadProgress({ loaded: 0, total: estimatedUploadSize, percent: 0 });
+        const total = (file?.size || 0) + (voiceNote?.size || 0);
+        setUploadPercent(0);
         const formData = new FormData();
         Object.entries(payload).forEach(([key, value]) => formData.append(key, value));
         if (file) formData.append('attachment', file);
-        if (voiceNote) {
-          const extension = audioExtensionFromMime(voiceNote.type);
-          formData.append('voiceNote', voiceNote, `citizen-voice-complaint.${extension}`);
-        }
+        if (voiceNote) formData.append('voiceNote', voiceNote, `citizen-voice-complaint.${audioExtensionFromMime(voiceNote.type)}`);
         complaint = await endpoints.createComplaint(formData, {
-          onUploadProgress: (progressEvent) => updateUploadProgress(progressEvent, estimatedUploadSize)
+          onUploadProgress: (progress) => {
+            const loaded = progress.loaded || 0;
+            const size = progress.total || total || 0;
+            setUploadPercent(size ? Math.min(99, Math.round((loaded / size) * 100)) : 0);
+          }
         });
-        setUploadProgress({ loaded: estimatedUploadSize, total: estimatedUploadSize, percent: 100 });
+        setUploadPercent(100);
       } else {
-        setUploadProgress(null);
         complaint = await endpoints.createComplaint(payload);
       }
-      setForm({
-        ...defaultComplaint,
-        citizenPhone: user?.phone || '',
-        cell: user?.cell || defaultComplaint.cell,
-        village: user?.village || defaultComplaint.village
-      });
-      setFile(null);
-      removeVoiceNote();
-      toast.success(`Complaint submitted. Tracking number ${complaint.trackingNumber}.`);
-      navigate(`/app/complaints/${complaint.trackingNumber}`);
+      setSubmitted(complaint);
     } catch (err) {
-      setUploadProgress(null);
-      toast.error(errorMessage(err, 'Could not submit complaint'));
+      setUploadPercent(null);
+      toast.error(errorMessage(err, 'Could not submit the complaint'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div style={{ maxWidth: 680 }}>
+        <div className="success">
+          <div className="big" aria-hidden="true">✅</div>
+          <p style={{ fontWeight: 800, fontSize: 18, marginTop: 6 }}>Your complaint was received.</p>
+          <p className="scf-big">{submitted.trackingNumber}</p>
+          <div className="meta" style={{ justifyContent: 'center' }}>
+            <span><b>Routed to:</b> {submitted.assignedOffice}</span>
+            <span><b>Answer due by:</b> {formatDate(submitted.dueDate)}</span>
+          </div>
+          <div className="row-actions" style={{ justifyContent: 'center', marginTop: 16 }}>
+            <Link className="btn" to={`/app/complaints/${submitted.trackingNumber}`}>Track this complaint</Link>
+            <button type="button" className="btn ghost" onClick={reset}>Submit another</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <PageTitle
+        title={`Welcome, ${user?.fullName?.split(' ')[0] || 'Citizen'}`}
+        subtitle="Describe the problem in your own words. You do not choose an office — the system routes it for you."
+      />
+      <form onSubmit={submit} className="card" style={{ marginTop: 18, maxWidth: 680 }}>
+        <p className="card-t">Write or speak your complaint</p>
+        <small className="hint">One step: say what happened, then send. Everything else is filled in for you.</small>
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 12, alignItems: 'flex-start' }}>
+          <textarea
+            className="input"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Example: There has been no water in our village for three days, the pipe burst near the market."
+          />
+          <button
+            type="button"
+            className={`mic ${recording ? 'rec' : ''}`}
+            onClick={recording ? stopRecording : startRecording}
+            title={recording ? 'Stop recording' : 'Record your complaint'}
+            aria-label={recording ? 'Stop recording' : 'Record your complaint'}
+          >
+            {recording ? <Square size={20} /> : <Mic size={20} />}
+          </button>
+        </div>
+
+        {recording && <p className="err" style={{ fontWeight: 600 }}>Recording now. Speak clearly, then press stop.</p>}
+        {voiceNoteUrl && (
+          <div style={{ marginTop: 10 }}>
+            <audio style={{ width: '100%' }} controls src={voiceNoteUrl} />
+            <div className="row-actions" style={{ marginTop: 6 }}>
+              <button type="button" className="btn red sm" onClick={removeVoiceNote}><Trash2 size={14} /> Remove recording</button>
+            </div>
+          </div>
+        )}
+
+        {category && (
+          <div className="auto-hint">
+            <span aria-hidden="true">✨</span>
+            <span><b>The system chose this category:</b> {category.name}</span>
+            <span>Change it below if that is not right.</span>
+          </div>
+        )}
+
+        <div className="cat-pick">
+          {categories.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`cat-opt ${category?.id === item.id ? 'on' : ''}`}
+              onClick={() => setPickedCategoryId(item.id)}
+            >
+              {item.name}
+            </button>
+          ))}
+        </div>
+
+        {category && (
+          <div className="meta" style={{ marginTop: 12 }}>
+            <span><span aria-hidden="true">📍</span> <b>Goes to:</b> {office || 'Assigned automatically'}</span>
+            <span><span aria-hidden="true">⏱️</span> <b>Answer within (days):</b> {category.slaDays}</span>
+          </div>
+        )}
+
+        <div className="row-actions">
+          <button type="button" className="btn ghost sm" onClick={() => setShowDetails((open) => !open)}>
+            {showDetails ? 'Hide extra details' : 'Add location, phone or evidence (optional)'}
+          </button>
+        </div>
+
+        {showDetails && (
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 14, display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
+              <div>
+                <label className="label" htmlFor="cell">Cell</label>
+                <select
+                  id="cell"
+                  className="input"
+                  value={cell}
+                  onChange={(event) => {
+                    setCell(event.target.value);
+                    setVillage(villagesForCell(event.target.value)[0] || '');
+                  }}
+                >
+                  {kacyiruLocation.cells.map((item) => <option key={item.name}>{item.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label" htmlFor="village">Village</label>
+                <select id="village" className="input" value={village} onChange={(event) => setVillage(event.target.value)}>
+                  {villagesForCell(cell).map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label" htmlFor="phone">Phone</label>
+                <input id="phone" className="input" value={phone} onChange={(event) => setPhone(event.target.value)} />
+              </div>
+            </div>
+
+            <div>
+              <label className="label" htmlFor="evidence">Evidence file (photo, video, audio or PDF, max 100 MB)</label>
+              <input id="evidence" className="input" type="file" accept="image/*,video/*,audio/*,.pdf" onChange={pickFile} />
+              {file && <small className="hint">{file.name} — {formatFileSize(file.size)}</small>}
+            </div>
+
+            <div>
+              <label className="label" htmlFor="evidence-link">Public evidence link (for large videos)</label>
+              <input
+                id="evidence-link"
+                className="input"
+                type="url"
+                value={evidenceLink}
+                onChange={(event) => setEvidenceLink(event.target.value)}
+                placeholder="https://drive.google.com/..."
+              />
+            </div>
+          </div>
+        )}
+
+        {uploadPercent !== null && (
+          <div style={{ marginTop: 14 }}>
+            <small className="hint">Uploading evidence. Keep this page open.</small>
+            <div className="bar-track" style={{ marginTop: 6 }}>
+              <div className="bar-fill" style={{ width: `${uploadPercent}%` }} />
+            </div>
+          </div>
+        )}
+
+        <button className="btn lg block" style={{ marginTop: 16 }} disabled={saving}>
+          {saving ? 'Sending…' : 'Send complaint'}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+/* ══════════════ CITIZEN: MY COMPLAINTS ══════════════ */
+
+export const MyComplaints = () => {
+  const [complaints, setComplaints] = useState(null);
+
+  const load = () => endpoints.myComplaints().then(setComplaints).catch(() => setComplaints([]));
+  useEffect(() => { load(); }, []);
+
+  if (!complaints) return <LoadingState />;
+
+  const open = complaints.filter((complaint) => !isTerminal(complaint));
+  const resolved = complaints.filter((complaint) => isTerminal(complaint));
+  const awaitingRating = complaints.filter((complaint) => complaint.status === 'Resolved' && !complaint.satisfaction);
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="My complaints" subtitle="Track every complaint you submitted and rate the answer you received." />
+      {complaints.length > 0 && (
+        <div className="stats">
+          <Stat label="All complaints" value={complaints.length} />
+          <Stat label="Still open" value={open.length} />
+          <Stat label="Resolved / closed" value={resolved.length} />
+          <Stat label="Waiting for your rating" value={awaitingRating.length} />
+        </div>
+      )}
+
+      {complaints.length === 0
+        ? <Empty title="You have not submitted a complaint yet" subtitle="Open the Submit Complaint tab to start." />
+        : (
+          <div className="grid g2">
+            {complaints.map((complaint) => (
+              <CitizenCase key={complaint.id} complaint={complaint} onChange={load} />
+            ))}
+          </div>
+        )}
+    </div>
+  );
+};
+
+const CitizenCase = ({ complaint, onChange, alwaysOpen = false }) => {
+  const toast = useToast();
+  const [open, setOpen] = useState(alwaysOpen);
+  const [comment, setComment] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
+  const [appealReason, setAppealReason] = useState('');
+  // Nothing is pre-selected: confirming a fix and appealing are opposite answers, and the
+  // citizen has to be the one who picks.
+  const [mode, setMode] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const rate = async (score) => {
+    setSaving(true);
+    try {
+      await endpoints.rateComplaint(complaint.trackingNumber, { score, comment, isPublic });
+      toast.success(score <= 2
+        ? `You rated ${score}/5, so ${complaint.trackingNumber} was reopened and escalated to ${SECTOR_OFFICE}.`
+        : `Thank you. ${complaint.trackingNumber} is now closed.`);
+      setComment('');
+      setMode(null);
+      onChange();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not save your rating'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const appeal = async () => {
+    setSaving(true);
+    try {
+      await endpoints.requestEscalation(complaint.trackingNumber, { reason: appealReason });
+      toast.success(`${complaint.trackingNumber} was escalated to ${SECTOR_OFFICE} at your request.`);
+      setAppealReason('');
+      setMode(null);
+      onChange();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not send your request'));
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div>
-      <PageHeader title="Submit Complaint" subtitle="Record a complaint or citizen feedback and receive a tracking number immediately." />
-      <form onSubmit={submit} className="grid gap-6 xl:grid-cols-[1fr_340px]">
-        <section className="panel p-6">
-          <div className="grid gap-4">
-            <label>
-              <span className="label">Complaint Type</span>
-              <select className="input" value={form.type} onChange={(event) => update('type', event.target.value)} required>
-                <option value="">Select type</option>
-                {meta?.categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="label">Description</span>
-              <textarea className="input min-h-36" value={form.description} onChange={(event) => update('description', event.target.value)} placeholder="Explain what happened, when it happened, and what help you expect." required={!voiceNote && !file && !form.evidenceLink.trim()} />
-            </label>
-            <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-              <div className="rounded-md border border-dashed border-slate-300 bg-white p-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">Voice complaint recording</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-500">Record the citizen speaking. The audio file is saved with the case exactly as recorded.</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className={recording ? 'btn-secondary text-red-700' : 'btn-secondary'} onClick={recording ? stopVoiceRecording : startVoiceRecording}>
-                      {recording ? <Square size={16} /> : <Mic size={16} />}
-                      {recording ? 'Stop Recording' : 'Record Voice Note'}
-                    </button>
-                    {voiceNote && !recording && (
-                      <button type="button" className="btn-secondary text-red-700" onClick={removeVoiceNote}>
-                        <Trash2 size={16} />
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {recording && <p className="mt-2 text-xs font-semibold text-red-600">Recording now. Speak clearly, then press Stop Recording.</p>}
-                {voiceNoteUrl && (
-                  <div className="mt-3">
-                    <audio className="w-full" controls src={voiceNoteUrl} />
-                    <p className="mt-1 text-xs text-slate-500">Play this audio to confirm it is clear before submitting.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Field label="Province" value={form.province} readOnly />
-              <Field label="District" value={form.district} readOnly />
-              <Field label="Sector" value={form.sector} readOnly />
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <label>
-                <span className="label">Cell</span>
-                <select className="input" value={form.cell} onChange={(event) => update('cell', event.target.value)} required>
-                  {kacyiruLocation.cells.map((cell) => <option key={cell.name}>{cell.name}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className="label">Village</span>
-                <select className="input" value={form.village} onChange={(event) => update('village', event.target.value)} required>
-                  {villagesForCell(form.cell).map((village) => <option key={village}>{village}</option>)}
-                </select>
-              </label>
-              <Field label="Phone" value={form.citizenPhone} onChange={(value) => update('citizenPhone', value)} />
-            </div>
-            <label>
-              <span className="label">Evidence Upload (image, video, audio, or PDF)</span>
-              <input
-                className="input"
-                type="file"
-                accept="image/*,video/*,audio/*,.pdf"
-                onChange={handleEvidenceFile}
-              />
-              {file && (
-                <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-                  <UploadCloud size={13} />
-                  {file.name} - {formatFileSize(file.size)} {file.type?.startsWith('video/') ? '(video evidence)' : file.type?.startsWith('audio/') ? '(audio evidence)' : ''}
-                </p>
-              )}
-              <p className="mt-1 text-xs text-slate-500">Maximum upload size is 100 MB. Video uploads can take a few minutes, so keep this page open. For larger videos, paste a public evidence link below.</p>
-            </label>
-            <label>
-              <span className="label">Public evidence link (optional)</span>
-              <input
-                className="input"
-                type="url"
-                value={form.evidenceLink}
-                onChange={(event) => update('evidenceLink', event.target.value)}
-                placeholder="https://drive.google.com/... or https://youtube.com/..."
-              />
-              <p className="mt-1 text-xs text-slate-500">Use this for videos larger than 100 MB. Make sure the link is public or shared with permission.</p>
-            </label>
-            {saving && uploadProgress && (
-              <div className="rounded-md border border-blue-100 bg-blue-50 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-bold text-blue-950">Uploading evidence</p>
-                  <p className="text-sm font-bold text-blue-700">{uploadProgress.percent}%</p>
-                </div>
-                <div className="mt-2 h-3 overflow-hidden rounded-full bg-white">
-                  <div
-                    className="h-full rounded-full bg-blue-600 transition-all duration-300"
-                    style={{ width: `${Math.max(3, uploadProgress.percent)}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-xs text-blue-900">
-                  {uploadProgress.total
-                    ? `${formatFileSize(uploadProgress.loaded)} of ${formatFileSize(uploadProgress.total)} uploaded. Keep this page open.`
-                    : 'Uploading evidence. Keep this page open.'}
-                </p>
-              </div>
-            )}
-          </div>
-          <div className="mt-6 flex justify-end">
-            <button className="btn-primary" disabled={saving || recording}>
-              <Send size={16} />
-              {recording ? 'Stop recording first' : saving ? 'Submitting...' : 'Submit Complaint'}
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+        <div>
+          <span className="scf">{complaint.trackingNumber}</span>
+          {isOverdue(complaint) && <span className="over" style={{ marginLeft: 8 }}>Past due date</span>}
+        </div>
+        <Badge value={complaint.status} />
+      </div>
+      <div className="meta">
+        <span><b>Office:</b> {complaint.assignedOffice}</span>
+        <span><b>Due date:</b> {formatDate(complaint.dueDate)}</span>
+      </div>
+      <p className="body-txt">{complaint.description}</p>
+      <EvidenceLinks complaint={complaint} />
+
+      {complaint.unreadMessages > 0 && (
+        <div className="meta" style={{ marginTop: 8 }}>
+          <span className="unread-dot">
+            {complaint.unreadMessages} new {complaint.unreadMessages === 1 ? 'message' : 'messages'}
+          </span>
+        </div>
+      )}
+
+      {complaint.status === 'Resolved' && !complaint.satisfaction && (
+        <div className="decide-box">
+          <p className="decide-title">The office marked this resolved — did it solve your problem?</p>
+          <div className="row-actions">
+            <button type="button" className={`btn sm ${mode === 'rate' ? '' : 'ghost'}`} disabled={saving} onClick={() => setMode('rate')}>
+              Yes, it is resolved
+            </button>
+            <button type="button" className={`btn sm ${mode === 'appeal' ? '' : 'ghost'}`} disabled={saving} onClick={() => setMode('appeal')}>
+              No, I still need help
             </button>
           </div>
-        </section>
-        <aside className="space-y-4">
-          <section className="panel p-5">
-            <h2 className="font-bold text-slate-950">Automatic Routing Preview</h2>
-            <div className="mt-4 space-y-3">
-              {meta?.categories.map((category) => {
-                const rule = meta.routingRules.find((item) => item.categoryId === category.id);
-                const office = meta.offices.find((item) => item.id === rule?.officeId);
-                return (
-                  <div key={category.id} className="rounded-md border border-slate-200 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-bold text-slate-800">{category.name}</p>
-                      <StatusBadge value={rule?.priority || category.defaultPriority} />
-                    </div>
-                    <p className="mt-1 text-xs text-slate-500">{office?.name} · SLA {rule?.slaDays || category.slaDays} days</p>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        </aside>
-      </form>
-    </div>
-  );
-};
 
-export const MyComplaints = () => {
-  const toast = useToast();
-  const [complaints, setComplaints] = useState([]);
-  const [rating, setRating] = useState({ score: 5, comment: '' });
-  const [savingId, setSavingId] = useState(null);
-  useEffect(() => { endpoints.myComplaints().then(setComplaints); }, []);
-
-  const rate = async (trackingNumber) => {
-    setSavingId(trackingNumber);
-    try {
-      const updated = await endpoints.rateComplaint(trackingNumber, rating);
-      setComplaints((items) => items.map((item) => (item.trackingNumber === trackingNumber ? updated : item)));
-      setRating({ score: 5, comment: '' });
-      toast.success(updated.status === 'Escalated'
-        ? 'Your feedback was saved and the case was escalated to sector administration.'
-        : 'Thank you, your rating was saved.');
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not save rating'));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  return (
-    <div>
-      <PageHeader title="My Complaints" subtitle="Track submitted cases, offices responsible, responses, and satisfaction rating." />
-      <div className="space-y-4">
-        {complaints.map((complaint) => (
-          <article key={complaint.trackingNumber} className="card p-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <div className="flex flex-wrap gap-2">
-                  <StatusBadge value={complaint.status} />
-                  <StatusBadge value={complaint.priority} />
-                </div>
-                <Link to={`/app/complaints/${complaint.trackingNumber}`} className="mt-3 block text-lg font-bold text-slate-950 hover:text-brand-600">{complaint.trackingNumber}</Link>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{complaint.description}</p>
-                <p className="mt-3 text-sm text-slate-500">Assigned to {complaint.assignedOffice} · Due {complaint.dueDate}</p>
+          {mode === 'rate' && (
+            <div style={{ marginTop: 12 }}>
+              <input
+                className="input"
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                placeholder="Tell others how you were helped (optional)"
+              />
+              <label className="chk">
+                <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
+                <span>Publish my feedback on the public page</span>
+              </label>
+              <div className="stars">
+                {[1, 2, 3, 4, 5].map((score) => (
+                  <button key={score} type="button" className="star" disabled={saving} onClick={() => rate(score)} aria-label={`Rate ${score} out of 5`}>★</button>
+                ))}
               </div>
-              {['Resolved', 'Closed'].includes(complaint.status) && !complaint.satisfaction && (
-                <div className="w-full rounded-md border border-slate-200 p-3 lg:w-72">
-                  <p className="text-sm font-bold text-slate-900">Rate resolution</p>
-                  <p className="mt-1 text-xs text-slate-500">A 1-2 star rating sends the case back to sector administration.</p>
-                  <select className="input mt-2" value={rating.score} onChange={(event) => setRating({ ...rating, score: Number(event.target.value) })}>
-                    {[5, 4, 3, 2, 1].map((value) => <option key={value} value={value}>{value} stars</option>)}
-                  </select>
-                  <textarea className="input mt-2 min-h-20" value={rating.comment} onChange={(event) => setRating({ ...rating, comment: event.target.value })} placeholder="Comment" />
-                  <button className="btn-primary mt-2 w-full" disabled={savingId === complaint.trackingNumber} onClick={() => rate(complaint.trackingNumber)}>
-                    <Star size={16} />
-                    {savingId === complaint.trackingNumber ? 'Saving...' : 'Save Rating'}
-                  </button>
-                </div>
-              )}
-              {complaint.satisfaction && <StatusBadge value={`${complaint.satisfaction.score} star rating`} />}
+              <small className="hint">Pick a rating to close this complaint. 1–2 stars sends it back to {SECTOR_OFFICE} instead.</small>
             </div>
-          </article>
-        ))}
-        {complaints.length === 0 && <p className="text-sm text-slate-500">You have not submitted any complaints yet.</p>}
-      </div>
+          )}
+
+          {mode === 'appeal' && (
+            <div style={{ marginTop: 12 }}>
+              <textarea
+                className="input"
+                rows={3}
+                value={appealReason}
+                onChange={(event) => setAppealReason(event.target.value)}
+                placeholder="Explain what is still not solved (optional)"
+              />
+              <div className="row-actions">
+                <button type="button" className="btn sm" disabled={saving} onClick={appeal}>
+                  {saving ? 'Sending…' : `Ask ${SECTOR_OFFICE} for help`}
+                </button>
+              </div>
+              <small className="hint">Your case is sent to {SECTOR_OFFICE} and the administrator is notified.</small>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* An unanswered case that has run past its deadline: the appeal is the only move left. */}
+      {complaint.canRequestEscalation && complaint.status !== 'Resolved' && (
+        <div className="decide-box">
+          <p className="decide-title">This complaint passed its due date without being solved.</p>
+          <textarea
+            className="input"
+            rows={2}
+            value={appealReason}
+            onChange={(event) => setAppealReason(event.target.value)}
+            placeholder="Explain what is still not solved (optional)"
+          />
+          <div className="row-actions">
+            <button type="button" className="btn sm" disabled={saving} onClick={appeal}>
+              {saving ? 'Sending…' : `Ask ${SECTOR_OFFICE} for help`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {complaint.escalationRequestedAt && complaint.status === 'Escalated' && (
+        <div className="meta" style={{ marginTop: 10 }}>
+          <span><b>You asked for senior review on:</b> {formatDate(complaint.escalationRequestedAt)}</span>
+        </div>
+      )}
+
+      {complaint.satisfaction && (
+        <div className="meta" style={{ marginTop: 10 }}>
+          <span><span aria-hidden="true">⭐</span> <b>You rated:</b> {complaint.satisfaction.score}/5</span>
+          {complaint.satisfaction.isPublic && <span>Published publicly</span>}
+        </div>
+      )}
+
+      {!alwaysOpen && (
+        <div className="row-actions">
+          <button type="button" className="btn ghost sm" onClick={() => setOpen((value) => !value)}>
+            {open ? 'Hide conversation & history' : 'Open conversation & history'}
+          </button>
+        </div>
+      )}
+      {/* Mounted only when the card is expanded: mounting is what marks the thread read,
+          so a collapsed card in a list must not claim the citizen has read it. */}
+      {open && (
+        <>
+          <ComplaintChat complaint={complaint} onChange={onChange} />
+          <Timeline items={timelineOf(complaint)} />
+        </>
+      )}
     </div>
   );
 };
+
+/* ══════════════ SHARED: SINGLE CASE PAGE ══════════════ */
 
 export const ComplaintDetails = () => {
   const { trackingNumber } = useParams();
+  const { user } = useAuth();
   const [complaint, setComplaint] = useState(null);
-  const toast = useToast();
-  useEffect(() => {
-    endpoints.complaint(trackingNumber).then(setComplaint).catch((err) => toast.error(errorMessage(err, 'Could not load complaint')));
-  }, [trackingNumber]);
+  const [missing, setMissing] = useState(false);
 
+  const load = () => endpoints.complaint(trackingNumber).then(setComplaint).catch(() => setMissing(true));
+  useEffect(() => { load(); }, [trackingNumber]);
+
+  if (missing) return <Empty title="Complaint not found" subtitle="It may have been removed, or it does not belong to your office." />;
   if (!complaint) return <LoadingState />;
-  const evidenceUrl = complaint.attachmentPath ? `${API_ORIGIN}${complaint.attachmentPath}` : '';
-  const voiceNoteUrl = complaint.voiceNotePath ? `${API_ORIGIN}${complaint.voiceNotePath}` : '';
+  const staffReadOnly = user?.role === 'admin' || (user?.role === 'staff' && complaint.assignedOfficeId !== user.officeId);
 
   return (
-    <div>
-      <PageHeader title={complaint.trackingNumber} subtitle="Complaint details, routing, responses, and status history." />
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <section className="panel p-6">
-          <div className="flex flex-wrap gap-2">
-            <StatusBadge value={complaint.status} />
-            <StatusBadge value={complaint.priority} />
-            <StatusBadge value={complaint.type} />
-          </div>
-          <h2 className="mt-5 text-xl font-bold text-slate-950">Complaint Description</h2>
-          <p className="mt-3 leading-7 text-slate-600">{complaint.description}</p>
-          <h2 className="mt-6 text-base font-bold text-slate-950">Response Timeline</h2>
-          <div className="mt-4 space-y-3">
-            {complaint.responses.map((response) => (
-              <div key={response.id} className="rounded-md border border-slate-200 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-bold text-slate-900">{response.responder}</p>
-                  <StatusBadge value={response.statusUpdate} />
-                </div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{response.responseText}</p>
-                <p className="mt-2 text-xs font-semibold text-slate-400">{formatDate(response.createdAt)}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-        <aside className="panel p-5">
-          <h2 className="font-bold text-slate-950">Routing Information</h2>
-          <Info label="Assigned Office" value={complaint.assignedOffice} />
-          <Info label="Assigned Officer" value={complaint.assignedTo} />
-          <Info label="Submission Mode" value={complaint.submissionMode || complaint.channel || 'Typed form'} />
-          <Info label="Location" value={complaint.location} />
-          <Info label="Cell / Village" value={[complaint.cell, complaint.village].filter(Boolean).join(' / ') || 'Not provided'} />
-          <Info label="Submitted" value={formatDate(complaint.createdAt)} />
-          <Info label="Due Date" value={complaint.dueDate} />
-          {complaint.voiceNotePath && (
-            <div className="mt-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Citizen Voice Recording</p>
-              <audio className="mt-2 w-full" controls src={voiceNoteUrl} />
-              <a href={voiceNoteUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1 text-sm font-semibold text-brand-600 hover:underline">
-                <Mic size={14} />
-                {complaint.voiceNoteName || 'Open voice recording'}
-              </a>
-            </div>
-          )}
-          {complaint.attachmentPath ? (
-            <div className="mt-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Evidence</p>
-              {complaint.evidenceType === 'video' && (
-                <video className="mt-2 aspect-video w-full rounded-md border border-slate-200 bg-black" controls src={evidenceUrl} />
-              )}
-              {complaint.evidenceType === 'audio' && (
-                <audio className="mt-2 w-full" controls src={evidenceUrl} />
-              )}
-              {complaint.evidenceType === 'image' && (
-                <img className="mt-2 max-h-72 w-full rounded-md border border-slate-200 object-cover" src={evidenceUrl} alt={complaint.attachmentName || 'Complaint evidence'} />
-              )}
-              <a href={evidenceUrl} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1 text-sm font-semibold text-brand-600 hover:underline">
-                <Paperclip size={14} />
-                {complaint.attachmentName || 'View attachment'}
-              </a>
-            </div>
-          ) : (
-            <Info label="Attachment" value="No attachment" />
-          )}
-          {complaint.evidenceLink && (
-            <div className="mt-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Public Evidence Link</p>
-              <a href={complaint.evidenceLink} target="_blank" rel="noreferrer" className="mt-1 block break-all text-sm font-semibold text-brand-600 hover:underline">
-                {complaint.evidenceLink}
-              </a>
-            </div>
-          )}
-          {complaint.satisfaction && <Info label="Citizen Rating" value={`${complaint.satisfaction.score}/5 - ${complaint.satisfaction.comment}`} />}
-        </aside>
+    <div style={{ marginTop: 22, maxWidth: 680 }}>
+      <PageTitle title={complaint.trackingNumber} subtitle={`${complaint.category} · ${complaint.assignedOffice}`} />
+      <div style={{ marginTop: 18 }}>
+        {user?.role === 'citizen'
+          ? <CitizenCase complaint={complaint} onChange={load} alwaysOpen />
+          : <StaffCase complaint={complaint} onChange={load} alwaysOpen readOnly={staffReadOnly} />}
       </div>
     </div>
   );
 };
 
-export const ComplaintOfficerDashboard = () => {
-  const [data, setData] = useState(null);
-  useEffect(() => {
-    Promise.all([endpoints.complaintReports(), endpoints.complaints()]).then(([reports, complaints]) => {
-      setData({ reports, complaints });
-    });
-  }, []);
-  if (!data) return <LoadingState />;
-
-  const { reports, complaints } = data;
-  const today = new Date().toISOString().slice(0, 10);
-  const active = complaints.filter((item) => !['Resolved', 'Closed'].includes(item.status));
-  const inProgress = complaints.filter((item) => ['Assigned', 'In Review', 'Waiting for Citizen'].includes(item.status));
-  const resolved = complaints.filter((item) => ['Resolved', 'Closed'].includes(item.status));
-  const overdue = active.filter((item) => item.dueDate < today);
-
-  return (
-    <div className="space-y-5">
-      <section className="overflow-hidden rounded-lg border border-emerald-200 bg-white shadow-soft">
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-emerald-700 px-5 py-4 text-white">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-100">Administrative Staff Dashboard</p>
-            <h1 className="text-xl font-bold">Receive, review, classify, respond, escalate, and prepare reports</h1>
-          </div>
-          <Link to="/staff/cases" className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2 text-sm font-bold text-emerald-700">
-            <ListChecks size={16} />
-            View Assigned Cases
-          </Link>
-        </div>
-
-        <div className="grid gap-5 p-5">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <StaffStat label="Assigned to Me" value={active.length} color="bg-blue-600" />
-            <StaffStat label="In Progress" value={inProgress.length} color="bg-amber-500" />
-            <StaffStat label="Resolved" value={resolved.length} color="bg-emerald-600" />
-            <StaffStat label="Overdue" value={overdue.length} color="bg-red-600" />
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-[1.35fr_0.9fr]">
-            <section className="rounded-lg border border-slate-200 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-bold text-slate-950">My Assigned Cases</h2>
-                <Link to="/staff/cases" className="text-xs font-bold text-emerald-700">View all</Link>
-              </div>
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="text-slate-500">
-                    <tr>
-                      <th className="py-2 pr-3">Tracking No.</th>
-                      <th className="py-2 pr-3">Complaint Title</th>
-                      <th className="py-2 pr-3">Priority</th>
-                      <th className="py-2 pr-3">Status</th>
-                      <th className="py-2 pr-3">Due Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {complaints.slice(0, 6).map((complaint) => (
-                      <tr key={complaint.trackingNumber}>
-                        <td className="py-2 pr-3 font-semibold text-slate-900">
-                          <Link to={`/staff/cases/${complaint.trackingNumber}`} className="hover:text-emerald-700">{complaint.trackingNumber}</Link>
-                        </td>
-                        <td className="max-w-[260px] truncate py-2 pr-3 text-slate-600">{complaint.description}</td>
-                        <td className="py-2 pr-3"><StatusBadge value={complaint.priority} /></td>
-                        <td className="py-2 pr-3"><StatusBadge value={complaint.status} /></td>
-                        <td className="py-2 pr-3 text-slate-500">{complaint.dueDate}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">Case Status Distribution</h2>
-              <SimpleRows data={reports.byStatus} color="bg-emerald-600" />
-            </section>
-          </div>
-
-          <section className="rounded-lg border border-slate-200 p-4">
-            <h2 className="text-sm font-bold text-slate-950">Case Processing Flow</h2>
-            <div className="mt-4 grid gap-3 md:grid-cols-5">
-              {[
-                '5. Review case and update status',
-                '6. Respond or request more information',
-                '7. Escalate unresolved or overdue case',
-                '8. Resolve, close and notify citizen',
-                '9. Citizen rates; managers view reports'
-              ].map((step) => (
-                <div key={step} className="rounded-md border border-emerald-100 bg-emerald-50 p-3 text-center text-xs font-semibold leading-5 text-slate-700">
-                  {step}
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">Upcoming Deadlines</h2>
-              <div className="mt-3 space-y-2">
-                {active.slice(0, 4).map((complaint) => (
-                  <div key={complaint.trackingNumber} className="flex items-center justify-between gap-3 rounded-md bg-slate-50 p-3 text-xs">
-                    <span className="font-bold text-slate-900">{complaint.trackingNumber}</span>
-                    <span className="text-slate-500">{complaint.dueDate}</span>
-                    <StatusBadge value={complaint.priority} />
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="rounded-lg border border-slate-200 p-4">
-              <h2 className="text-sm font-bold text-slate-950">Quick Actions</h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-4">
-                <StaffAction to="/staff/cases" label="Update Status" />
-                <StaffAction to="/staff/respond" label="Request Info" />
-                <StaffAction to="/staff/respond" label="Respond to Citizen" />
-                <StaffAction to="/staff/escalations" label="Escalate Case" />
-              </div>
-            </section>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-};
+/* ══════════════ STAFF: CASES ══════════════ */
 
 export const AssignedCases = () => {
-  const toast = useToast();
-  const [complaints, setComplaints] = useState([]);
-  const [drafts, setDrafts] = useState({});
-  const [busyId, setBusyId] = useState(null);
+  const { user } = useAuth();
+  const [complaints, setComplaints] = useState(null);
+  const [offices, setOffices] = useState(null);
+  const [filter, setFilter] = useState('open');
+
+  const load = () => endpoints.complaints({ scope: 'all' }).then(setComplaints).catch(() => setComplaints([]));
   useEffect(() => {
-    endpoints.complaints().then(setComplaints);
+    load();
+    endpoints.complaintMeta().then((meta) => setOffices(meta.offices)).catch(() => setOffices([]));
   }, []);
 
-  const updateDraft = (trackingNumber, patch) => setDrafts((current) => ({
-    ...current,
-    [trackingNumber]: { status: 'In Review', responseText: '', ...(current[trackingNumber] || {}), ...patch }
-  }));
+  // Both must land before the header renders, or the office name flashes as "not assigned".
+  if (!complaints || !offices) return <LoadingState />;
 
-  const updateStatus = async (trackingNumber) => {
-    const draft = drafts[trackingNumber] || { status: 'In Review', responseText: 'Case reviewed by responsible office.' };
-    const payload = { ...draft };
-    delete payload.assignedOfficeId;
-    setBusyId(trackingNumber);
-    try {
-      const updated = await endpoints.updateComplaintStatus(trackingNumber, payload);
-      setComplaints((items) => items.map((item) => (item.trackingNumber === trackingNumber ? updated : item)));
-      toast.success(`${trackingNumber} updated to ${updated.status}.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not update complaint'));
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const officeName = offices.find((office) => office.id === user?.officeId)?.name;
 
-  const escalate = async (trackingNumber) => {
-    setBusyId(trackingNumber);
-    try {
-      const updated = await endpoints.escalateComplaint(trackingNumber, { reason: 'Escalated because the case needs senior administrative follow-up.' });
-      setComplaints((items) => items.map((item) => (item.trackingNumber === trackingNumber ? updated : item)));
-      toast.success(`${trackingNumber} escalated.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not escalate complaint'));
-    } finally {
-      setBusyId(null);
-    }
-  };
+  const visible = complaints.filter((complaint) => {
+    if (filter === 'open') return !isTerminal(complaint);
+    if (filter === 'overdue') return isOverdue(complaint);
+    if (filter === 'escalated') return complaint.status === 'Escalated';
+    return true;
+  });
+
+  const filters = [
+    { key: 'open', label: 'Open', count: complaints.filter((complaint) => !isTerminal(complaint)).length },
+    { key: 'overdue', label: 'Past due date', count: complaints.filter(isOverdue).length },
+    { key: 'escalated', label: 'Escalated', count: complaints.filter((complaint) => complaint.status === 'Escalated').length },
+    { key: 'all', label: 'All', count: complaints.length }
+  ];
 
   return (
-    <div>
-      <PageHeader title="Assigned Cases" subtitle="Review complaints currently assigned to your responsible office and open the right workflow for follow-up." />
-      <div className="space-y-4">
-        {complaints.map((complaint) => (
-          <article key={complaint.trackingNumber} className="card p-5">
-            <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
-              <div>
-                <div className="flex flex-wrap gap-2">
-                  <StatusBadge value={complaint.status} />
-                  <StatusBadge value={complaint.priority} />
-                  <StatusBadge value={complaint.type} />
-                </div>
-                <Link to={`/staff/cases/${complaint.trackingNumber}`} className="mt-3 block text-lg font-bold text-slate-950 hover:text-emerald-700">
-                  {complaint.trackingNumber}
-                </Link>
-                <p className="mt-2 text-sm leading-6 text-slate-600">{complaint.description}</p>
-                <Link to={`/staff/cases/${complaint.trackingNumber}`} className="btn-secondary mt-4 inline-flex">
-                  <FileText size={16} />
-                  View full details
-                </Link>
-                <p className="mt-3 text-sm text-slate-500">{complaint.assignedOffice} · {complaint.assignedTo} · Due {complaint.dueDate}</p>
-              </div>
-              <div className="rounded-md border border-slate-200 p-3">
-                <label className="block">
-                  <span className="label">Status update</span>
-                  <select className="input" value={drafts[complaint.trackingNumber]?.status || complaint.status} onChange={(event) => updateDraft(complaint.trackingNumber, { status: event.target.value })}>
-                    {['In Review', 'Waiting for Citizen', 'Resolved', 'Closed'].map((status) => <option key={status}>{status}</option>)}
-                  </select>
-                </label>
-                <textarea className="input mt-2 min-h-24" value={drafts[complaint.trackingNumber]?.responseText || ''} onChange={(event) => updateDraft(complaint.trackingNumber, { responseText: event.target.value })} placeholder="Official response to citizen" />
-                <div className="mt-2 flex gap-2">
-                  <button className="btn-primary flex-1" disabled={busyId === complaint.trackingNumber} onClick={() => updateStatus(complaint.trackingNumber)}><CheckCircle2 size={16} />Save</button>
-                  <button className="btn-secondary flex-1 text-amber-700" disabled={busyId === complaint.trackingNumber} onClick={() => escalate(complaint.trackingNumber)}><AlertTriangle size={16} />Escalate</button>
-                </div>
-              </div>
-            </div>
-          </article>
+    <div style={{ marginTop: 22 }}>
+      <PageTitle
+        title={officeName || 'No office assigned yet'}
+        subtitle="You can review every submitted complaint. Only cases assigned to your office can be updated or resolved."
+      />
+
+      <div className="toolbar">
+        {filters.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`tab ${filter === item.key ? 'active' : ''}`}
+            onClick={() => setFilter(item.key)}
+          >
+            {item.label}
+            {item.count > 0 && <span className="count">{item.count}</span>}
+          </button>
         ))}
-        {complaints.length === 0 && <p className="text-sm text-slate-500">No complaints have been assigned yet.</p>}
-      </div>
-    </div>
-  );
-};
-
-const staffWorkflowCopy = {
-  classify: {
-    title: 'Review & Prioritize',
-    subtitle: 'Review department cases, confirm priority, and update the first response status.',
-    emptyText: 'No active cases are waiting for classification.',
-    panelTitle: 'Case review',
-    responsePlaceholder: 'Explain the review or priority decision.'
-  },
-  respond: {
-    title: 'Respond / Update',
-    subtitle: 'Send official responses, request information, and move cases through their status.',
-    emptyText: 'No active cases need a response right now.',
-    panelTitle: 'Response',
-    responsePlaceholder: 'Write the response the citizen should see.'
-  },
-  escalations: {
-    title: 'Escalations',
-    subtitle: 'Escalate overdue, critical, or unresolved cases for senior follow-up.',
-    emptyText: 'No overdue, critical, or escalated cases need action.',
-    panelTitle: 'Escalation action',
-    responsePlaceholder: 'Explain why this case needs senior follow-up.'
-  }
-};
-
-const staffCaseFilter = (mode, complaint) => {
-  if (mode === 'classify') return activeStatuses.includes(complaint.status) && complaint.status !== 'Escalated';
-  if (mode === 'respond') return activeStatuses.includes(complaint.status);
-  if (mode === 'escalations') return complaint.status === 'Escalated' || complaint.priority === 'Critical' || isOverdue(complaint);
-  return true;
-};
-
-const defaultStaffDraft = (complaint, mode) => ({
-  priority: complaint.priority || 'Medium',
-  status: mode === 'escalations'
-    ? (complaint.status === 'Escalated' ? 'Escalated' : complaint.status)
-    : (complaint.status === 'Assigned' ? 'In Review' : complaint.status),
-  responseText: '',
-  escalatedTo: complaint.escalatedTo || 'Sector Executive Office',
-  escalationReason: ''
-});
-
-const defaultStaffResponse = (complaint, mode, draft) => {
-  if (mode === 'classify') return `Case reviewed as ${draft.priority || complaint.priority} priority for department follow-up.`;
-  if (mode === 'escalations') return draft.escalationReason || 'Escalated because the case needs senior administrative follow-up.';
-  return 'Case reviewed by responsible office.';
-};
-
-const StaffCaseWorkflow = ({ mode }) => {
-  const copy = staffWorkflowCopy[mode];
-  const toast = useToast();
-  const [complaints, setComplaints] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [drafts, setDrafts] = useState({});
-  const [busyId, setBusyId] = useState(null);
-
-  useEffect(() => {
-    endpoints.complaints()
-      .then(setComplaints)
-      .finally(() => setLoading(false));
-  }, []);
-
-  const visibleComplaints = complaints.filter((complaint) => staffCaseFilter(mode, complaint));
-  const active = complaints.filter((complaint) => !isTerminal(complaint));
-  const overdue = complaints.filter(isOverdue);
-  const escalated = complaints.filter((complaint) => complaint.status === 'Escalated');
-  const draftFor = (complaint) => ({ ...defaultStaffDraft(complaint, mode), ...(drafts[complaint.trackingNumber] || {}) });
-
-  const updateDraft = (complaint, patch) => setDrafts((current) => ({
-    ...current,
-    [complaint.trackingNumber]: { ...defaultStaffDraft(complaint, mode), ...(current[complaint.trackingNumber] || {}), ...patch }
-  }));
-
-  const clearDraft = (trackingNumber) => setDrafts((current) => {
-    const next = { ...current };
-    delete next[trackingNumber];
-    return next;
-  });
-
-  const updateStatus = async (complaint) => {
-    const draft = draftFor(complaint);
-    const payload = {
-      status: draft.status,
-      priority: draft.priority || complaint.priority,
-      responseText: draft.responseText?.trim() || defaultStaffResponse(complaint, mode, draft)
-    };
-
-    setBusyId(complaint.trackingNumber);
-    try {
-      const updated = await endpoints.updateComplaintStatus(complaint.trackingNumber, payload);
-      setComplaints((items) => items.map((item) => (item.trackingNumber === complaint.trackingNumber ? updated : item)));
-      clearDraft(complaint.trackingNumber);
-      toast.success(`${complaint.trackingNumber} updated to ${updated.status}.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not update complaint'));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const escalate = async (complaint) => {
-    const draft = draftFor(complaint);
-    setBusyId(complaint.trackingNumber);
-    try {
-      const updated = await endpoints.escalateComplaint(complaint.trackingNumber, {
-        escalatedTo: draft.escalatedTo || 'Sector Executive Office',
-        reason: draft.escalationReason?.trim() || draft.responseText?.trim() || defaultStaffResponse(complaint, 'escalations', draft)
-      });
-      setComplaints((items) => items.map((item) => (item.trackingNumber === complaint.trackingNumber ? updated : item)));
-      clearDraft(complaint.trackingNumber);
-      toast.success(`${complaint.trackingNumber} escalated.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not escalate complaint'));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  if (loading) return <LoadingState />;
-
-  return (
-    <div>
-      <PageHeader title={copy.title} subtitle={copy.subtitle} />
-      <div className="mb-5 grid gap-3 md:grid-cols-4">
-        <StaffStat label="Assigned to Office" value={complaints.length} color="bg-blue-600" />
-        <StaffStat label="Active" value={active.length} color="bg-amber-500" />
-        <StaffStat label="Escalated" value={escalated.length} color="bg-red-600" />
-        <StaffStat label="Overdue" value={overdue.length} color="bg-red-600" />
       </div>
 
-      <div className="space-y-4">
-        {visibleComplaints.map((complaint) => {
-          const draft = draftFor(complaint);
-          const escalationMode = mode === 'escalations';
-          const showClassification = mode === 'classify';
-          const statusChoices = (escalationMode || complaint.status === 'Escalated') ? ['Escalated', 'In Review', 'Waiting for Citizen', 'Resolved', 'Closed'] : staffStatusOptions;
-
-          return (
-            <article key={complaint.trackingNumber} className="card p-5">
-              <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
-                <div>
-                  <div className="flex flex-wrap gap-2">
-                    <StatusBadge value={complaint.status} />
-                    <StatusBadge value={complaint.priority} />
-                    <StatusBadge value={complaint.type} />
-                    {isOverdue(complaint) && <StatusBadge value="Overdue" />}
-                  </div>
-                  <Link to={`/staff/cases/${complaint.trackingNumber}`} className="mt-3 block text-lg font-bold text-slate-950 hover:text-emerald-700">
-                    {complaint.trackingNumber}
-                  </Link>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">{complaint.description}</p>
-                  <p className="mt-3 text-sm text-slate-500">{complaint.assignedOffice} - {complaint.assignedTo} - Due {complaint.dueDate}</p>
-                  <Link to={`/staff/cases/${complaint.trackingNumber}`} className="btn-secondary mt-4 inline-flex">
-                    <FileText size={16} />
-                    View full details
-                  </Link>
-                </div>
-
-                <div className="rounded-md border border-slate-200 p-3">
-                  <h2 className="text-sm font-bold text-slate-950">{copy.panelTitle}</h2>
-                  {showClassification && (
-                    <div className="mt-3">
-                      <label>
-                        <span className="label">Priority</span>
-                        <select className="input" value={draft.priority} onChange={(event) => updateDraft(complaint, { priority: event.target.value })}>
-                          {priorityOptions.map((priority) => <option key={priority}>{priority}</option>)}
-                        </select>
-                      </label>
-                    </div>
-                  )}
-
-                  <label className="mt-2 block">
-                    <span className="label">Status update</span>
-                    <select className="input" value={draft.status} onChange={(event) => updateDraft(complaint, { status: event.target.value })}>
-                      {statusChoices.map((status) => <option key={status}>{status}</option>)}
-                    </select>
-                  </label>
-
-                  {escalationMode && (
-                    <Field label="Escalate to" value={draft.escalatedTo} onChange={(value) => updateDraft(complaint, { escalatedTo: value })} />
-                  )}
-
-                  <textarea
-                    className="input mt-2 min-h-24"
-                    value={escalationMode ? draft.escalationReason : draft.responseText}
-                    onChange={(event) => updateDraft(complaint, escalationMode ? { escalationReason: event.target.value } : { responseText: event.target.value })}
-                    placeholder={copy.responsePlaceholder}
-                  />
-
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                    <button className="btn-primary" disabled={busyId === complaint.trackingNumber} onClick={() => updateStatus(complaint)}>
-                      <CheckCircle2 size={16} />
-                      Save
-                    </button>
-                    {!isTerminal(complaint) && (
-                      <button className="btn-secondary text-amber-700" disabled={busyId === complaint.trackingNumber} onClick={() => escalate(complaint)}>
-                        <AlertTriangle size={16} />
-                        Escalate
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </article>
-          );
-        })}
-        {visibleComplaints.length === 0 && <p className="text-sm text-slate-500">{copy.emptyText}</p>}
-      </div>
-    </div>
-  );
-};
-
-export const StaffClassifyAssign = () => <StaffCaseWorkflow mode="classify" />;
-export const StaffRespondUpdate = () => <StaffCaseWorkflow mode="respond" />;
-export const StaffEscalations = () => <StaffCaseWorkflow mode="escalations" />;
-
-export const AdminComplaints = () => {
-  const toast = useToast();
-  const [complaints, setComplaints] = useState([]);
-  const [busyId, setBusyId] = useState(null);
-  useEffect(() => { endpoints.complaints().then(setComplaints); }, []);
-
-  const removeComplaint = async (complaint) => {
-    if (!window.confirm(`Delete ${complaint.trackingNumber}? Its responses, notifications, and rating are removed with it.`)) return;
-    setBusyId(complaint.trackingNumber);
-    try {
-      await endpoints.deleteComplaint(complaint.trackingNumber);
-      setComplaints((items) => items.filter((item) => item.trackingNumber !== complaint.trackingNumber));
-      toast.success(`${complaint.trackingNumber} was deleted.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not delete complaint'));
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  return (
-    <div>
-      <PageHeader title="Complaint Register" subtitle="Central case register showing tracking numbers, routing, offices, priorities, and status." />
-      <ComplaintTable complaints={complaints} base="/admin/complaints" onDelete={removeComplaint} busyId={busyId} />
-    </div>
-  );
-};
-
-export const AdminComplaintReports = () => {
-  const [reports, setReports] = useState(null);
-  useEffect(() => { endpoints.complaintReports().then(setReports); }, []);
-  if (!reports) return <LoadingState />;
-  return (
-    <div>
-      <PageHeader title="Complaint Reports" subtitle="Management dashboard for categories, offices, status, response control, escalation, and satisfaction." />
-      <ComplaintStats summary={reports.summary} />
-      {reports.adminAttention?.length > 0 && (
-        <section className="panel mt-6 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-bold text-slate-950">Needs Sector Admin Attention</h2>
-              <p className="mt-1 text-sm text-slate-500">Escalated, overdue, or low-rated cases that need follow-up with the responsible office.</p>
-            </div>
-            <StatusBadge value={`${reports.summary.needsAdminAttention} cases`} />
+      {visible.length === 0
+        ? <Empty title="No cases here" subtitle="New complaints routed to your office arrive here automatically." />
+        : (
+          <div className="grid g2">
+            {visible.map((complaint) => (
+              <StaffCase
+                key={complaint.id}
+                complaint={complaint}
+                onChange={load}
+                readOnly={complaint.assignedOfficeId !== user?.officeId}
+                detailPath={`/staff/cases/${complaint.trackingNumber}`}
+              />
+            ))}
           </div>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr><th className="px-4 py-3">Tracking</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Officer</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Due</th></tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {reports.adminAttention.map((complaint) => (
-                  <tr key={complaint.trackingNumber}>
-                    <td className="px-4 py-3 font-semibold text-slate-900"><Link to={`/admin/complaints/${complaint.trackingNumber}`} className="hover:text-brand-600">{complaint.trackingNumber}</Link></td>
-                    <td className="px-4 py-3 text-slate-500">{complaint.assignedOffice}</td>
-                    <td className="px-4 py-3 text-slate-500">{complaint.assignedTo}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        {complaint.status === 'Escalated' && <StatusBadge value="Escalated" />}
-                        {isOverdue(complaint) && <StatusBadge value="Overdue" />}
-                        {complaint.satisfaction?.score <= 2 && <StatusBadge value={`${complaint.satisfaction.score} star rating`} />}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{complaint.dueDate}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        )}
+    </div>
+  );
+};
+
+const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, detailPath }) => {
+  const toast = useToast();
+  const [open, setOpen] = useState(alwaysOpen);
+  const [response, setResponse] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const act = async (label, run) => {
+    setSaving(true);
+    try {
+      await run();
+      toast.success(label);
+      setResponse('');
+      onChange();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not update the case'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setStatus = (status) => act(
+    `${complaint.trackingNumber} is now ${status}.`,
+    () => endpoints.updateComplaintStatus(complaint.trackingNumber, { status, responseText: response })
+  );
+
+  const resolve = () => {
+    if (!response.trim()) return toast.error('Write the official answer before you resolve the case.');
+    return act(
+      `${complaint.trackingNumber} was resolved. The citizen can now rate it.`,
+      () => endpoints.updateComplaintStatus(complaint.trackingNumber, { status: 'Resolved', responseText: response })
+    );
+  };
+
+  const escalate = () => act(
+    `${complaint.trackingNumber} was escalated to ${SECTOR_OFFICE}.`,
+    () => endpoints.escalateComplaint(complaint.trackingNumber, { escalatedTo: SECTOR_OFFICE, reason: response })
+  );
+
+  const canWork = !readOnly && !isTerminal(complaint);
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+        <div>
+          <span className="scf">{complaint.trackingNumber}</span>
+          {isOverdue(complaint) && <span className="over" style={{ marginLeft: 8 }}>Past due date</span>}
+        </div>
+        <Badge value={complaint.status} />
+      </div>
+      <div className="meta">
+        <span><b>Category:</b> {complaint.category}</span>
+        <span><b>Office:</b> {complaint.assignedOffice}</span>
+        <span><b>Priority:</b> {complaint.priority}</span>
+        <span><b>Due date:</b> {formatDate(complaint.dueDate)}</span>
+      </div>
+      <div className="meta">
+        {complaint.isAnonymous
+          ? <span><span aria-hidden="true">🕶️</span> <b>Anonymous report</b> — the reporter is not identified</span>
+          : (
+            <>
+              <span><b>Citizen:</b> {complaint.citizenName}</span>
+              {complaint.citizenPhone && <span><b>Phone:</b> {complaint.citizenPhone}</span>}
+            </>
+          )}
+        <span><b>Where:</b> {[complaint.village, complaint.cell].filter(Boolean).join(', ') || complaint.location}</span>
+      </div>
+      <div className="meta">
+        <span><b>Submitted:</b> {formatDateTime(complaint.createdAt)}</span>
+        <span><b>Channel:</b> {complaint.channel || 'Web Portal'}</span>
+        <span><b>Mode:</b> {complaint.submissionMode || 'Typed form'}</span>
+        {complaint.assignedTo && <span><b>Assigned to:</b> {complaint.assignedTo}</span>}
+      </div>
+      {readOnly && (
+        <div className="case-note">
+          View-only for your account. This case is assigned to {complaint.assignedOffice || 'another office'}.
+        </div>
       )}
-      <div className="mt-6 grid gap-6 xl:grid-cols-3">
-        <section className="panel p-5"><h2 className="mb-4 font-bold text-slate-950">By Status</h2><CategoryDonut data={reports.byStatus} /></section>
-        <section className="panel p-5"><h2 className="mb-4 font-bold text-slate-950">By Category</h2><CategoryDonut data={reports.byCategory} /></section>
-        <section className="panel p-5"><h2 className="mb-4 font-bold text-slate-950">By Office</h2><CategoryDonut data={reports.byOffice} /></section>
+      <p className="body-txt">{complaint.description}</p>
+      <EvidenceLinks complaint={complaint} />
+
+      {complaint.unreadMessages > 0 && (
+        <div className="meta" style={{ marginTop: 8 }}>
+          <span className="unread-dot">
+            {complaint.unreadMessages} new {complaint.unreadMessages === 1 ? 'message' : 'messages'} from the citizen
+          </span>
+        </div>
+      )}
+
+      <div className="row-actions">
+        {detailPath && <Link className="btn ghost sm" to={detailPath}>View full details</Link>}
+        <button type="button" className="btn ghost sm" onClick={() => setOpen((value) => !value)}>
+          {open ? 'Close case panel' : readOnly ? 'See case history' : 'Open & work on this case'}
+        </button>
       </div>
-      <section className="panel mt-6 p-5">
-        <h2 className="mb-4 font-bold text-slate-950">Recent Audit Logs</h2>
-        <div className="space-y-3">
-          {reports.auditLogs.map((log) => (
-            <div key={log.id} className="rounded-md border border-slate-200 p-3">
-              <p className="text-sm font-bold text-slate-900">{log.action}</p>
-              <p className="text-xs text-slate-500">{log.actor} · {formatDate(log.createdAt)}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-};
 
-const useRoutingDrafts = (meta) => {
-  const [drafts, setDrafts] = useState({});
-  const ruleValue = (rule, field) => drafts[rule.id]?.[field] ?? rule[field];
-  const setField = (ruleId, field, value) => setDrafts((current) => ({ ...current, [ruleId]: { ...current[ruleId], [field]: value } }));
-  const isDirty = (rule) => Boolean(drafts[rule.id]);
-  const clear = (ruleId) => setDrafts((current) => {
-    const next = { ...current };
-    delete next[ruleId];
-    return next;
-  });
-  return { ruleValue, setField, isDirty, clear };
-};
-
-export const AdminRoutingRules = () => {
-  const toast = useToast();
-  const [meta, setMeta] = useState(null);
-  const [savingId, setSavingId] = useState(null);
-  const [creatingRule, setCreatingRule] = useState(false);
-  const [newRule, setNewRule] = useState({ categoryId: '', officeId: '', location: 'Kacyiru', priority: 'Medium', slaDays: 3 });
-  const { ruleValue, setField, isDirty, clear } = useRoutingDrafts(meta);
-  useEffect(() => {
-    endpoints.complaintMeta().then((data) => {
-      setMeta(data);
-      setNewRule((current) => ({
-        ...current,
-        categoryId: current.categoryId || data.categories[0]?.id || '',
-        officeId: current.officeId || data.offices[0]?.id || ''
-      }));
-    });
-  }, []);
-
-  const updateNewRule = (field, value) => setNewRule((current) => ({ ...current, [field]: value }));
-
-  const createRule = async (event) => {
-    event.preventDefault();
-    if (!newRule.categoryId || !newRule.officeId) return;
-    setCreatingRule(true);
-    try {
-      const result = await endpoints.createRoutingRule({
-        categoryId: Number(newRule.categoryId),
-        officeId: Number(newRule.officeId),
-        location: newRule.location || 'Kacyiru',
-        priority: newRule.priority,
-        slaDays: Number(newRule.slaDays || 3)
-      });
-      setMeta((current) => ({ ...current, routingRules: result.routingRules }));
-      setNewRule((current) => ({ ...current, location: 'Kacyiru', priority: 'Medium', slaDays: 3 }));
-      toast.success('Routing rule added.');
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not add routing rule'));
-    } finally {
-      setCreatingRule(false);
-    }
-  };
-
-  const saveRule = async (rule) => {
-    setSavingId(rule.id);
-    try {
-      const patch = {
-        officeId: ruleValue(rule, 'officeId'),
-        priority: ruleValue(rule, 'priority'),
-        slaDays: ruleValue(rule, 'slaDays')
-      };
-      const result = await endpoints.updateRoutingRule(rule.id, patch);
-      setMeta((current) => ({ ...current, routingRules: result.routingRules }));
-      clear(rule.id);
-      toast.success('Routing rule updated.');
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not update routing rule'));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const removeRule = async (rule) => {
-    const complaintType = meta.categories.find((item) => item.id === rule.categoryId);
-    if (!window.confirm(`Delete the routing rule for ${complaintType?.name} in ${rule.location}? New complaints of this type will have no office to route to unless another rule covers them.`)) return;
-    setSavingId(rule.id);
-    try {
-      const result = await endpoints.deleteRoutingRule(rule.id);
-      setMeta((current) => ({ ...current, routingRules: result.routingRules }));
-      clear(rule.id);
-      toast.success('Routing rule deleted.');
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not delete routing rule'));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  if (!meta) return <LoadingState />;
-
-  return (
-    <div>
-      <PageHeader title="Routing Rules" subtitle="Map complaint types and locations to the responsible administrative office." />
-      <form onSubmit={createRule} className="panel mb-6 grid gap-3 p-5 md:grid-cols-[1.2fr_1.2fr_0.9fr_0.8fr_0.6fr_auto]">
-        <label>
-          <span className="label">Complaint type</span>
-          <select className="input" value={newRule.categoryId} onChange={(event) => updateNewRule('categoryId', event.target.value)} required>
-            {meta.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="label">Responsible office</span>
-          <select className="input" value={newRule.officeId} onChange={(event) => updateNewRule('officeId', event.target.value)} required>
-            {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-          </select>
-        </label>
-        <Field label="Location" value={newRule.location} onChange={(value) => updateNewRule('location', value)} />
-        <label>
-          <span className="label">Priority</span>
-          <select className="input" value={newRule.priority} onChange={(event) => updateNewRule('priority', event.target.value)}>
-            {['Low', 'Medium', 'High', 'Critical'].map((priority) => <option key={priority}>{priority}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="label">SLA days</span>
-          <input className="input" type="number" min="1" value={newRule.slaDays} onChange={(event) => updateNewRule('slaDays', Number(event.target.value))} />
-        </label>
-        <div className="flex items-end">
-          <button className="btn-primary w-full" disabled={creatingRule}><PlusCircle size={16} />{creatingRule ? 'Adding...' : 'Add Rule'}</button>
-        </div>
-      </form>
-      <section className="panel overflow-x-auto">
-        <table className="w-full min-w-[900px] text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-            <tr><th className="px-4 py-3">Complaint Type</th><th className="px-4 py-3">Location</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">SLA</th><th className="px-4 py-3" /></tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {meta.routingRules.map((rule) => {
-              const complaintType = meta.categories.find((item) => item.id === rule.categoryId);
-              return (
-                <tr key={rule.id}>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{complaintType?.name}</td>
-                  <td className="px-4 py-3 text-slate-500">{rule.location}</td>
-                  <td className="px-4 py-3">
-                    <select className="input" value={ruleValue(rule, 'officeId')} onChange={(event) => setField(rule.id, 'officeId', event.target.value)}>
-                      {meta.offices.map((officeItem) => <option key={officeItem.id} value={officeItem.id}>{officeItem.name}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-4 py-3">
-                    <select className="input" value={ruleValue(rule, 'priority')} onChange={(event) => setField(rule.id, 'priority', event.target.value)}>
-                      {['Low', 'Medium', 'High', 'Critical'].map((priority) => <option key={priority}>{priority}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-4 py-3">
-                    <input className="input w-24" type="number" min="1" value={ruleValue(rule, 'slaDays')} onChange={(event) => setField(rule.id, 'slaDays', Number(event.target.value))} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      {isDirty(rule) && (
-                        <button className="btn-primary" disabled={savingId === rule.id} onClick={() => saveRule(rule)}>
-                          {savingId === rule.id ? 'Saving...' : 'Save'}
-                        </button>
-                      )}
-                      <button
-                        className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
-                        disabled={savingId === rule.id}
-                        onClick={() => removeRule(rule)}
-                        aria-label={`Delete routing rule ${rule.id}`}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
-    </div>
-  );
-};
-
-export const ComplaintTypeManagement = () => {
-  const toast = useToast();
-  const [meta, setMeta] = useState(null);
-  const [savingId, setSavingId] = useState(null);
-  const [newCategory, setNewCategory] = useState({ name: '', description: '', defaultPriority: 'Medium', slaDays: 3 });
-  const [creating, setCreating] = useState(false);
-  const [categoryDrafts, setCategoryDrafts] = useState({});
-  const { ruleValue, setField, isDirty, clear } = useRoutingDrafts(meta);
-  useEffect(() => { endpoints.complaintMeta().then(setMeta); }, []);
-
-  const categoryValue = (category, field) => categoryDrafts[category.id]?.[field] ?? category[field];
-  const setCategoryField = (id, field, value) => setCategoryDrafts((current) => ({ ...current, [id]: { ...current[id], [field]: value } }));
-  const categoryDirty = (category) => Boolean(categoryDrafts[category.id]);
-
-  const saveCategory = async (category) => {
-    setSavingId(`cat-${category.id}`);
-    try {
-      const updated = await endpoints.updateComplaintCategory(category.id, {
-        name: categoryValue(category, 'name'),
-        description: categoryValue(category, 'description'),
-        defaultPriority: categoryValue(category, 'defaultPriority'),
-        slaDays: Number(categoryValue(category, 'slaDays'))
-      });
-      setMeta((current) => ({ ...current, categories: current.categories.map((item) => (item.id === updated.id ? updated : item)) }));
-      setCategoryDrafts((current) => {
-        const next = { ...current };
-        delete next[category.id];
-        return next;
-      });
-      toast.success(`Category "${updated.name}" updated.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not update category'));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const removeCategory = async (category) => {
-    if (!window.confirm(`Delete the category "${category.name}"? Its routing rules are removed with it.`)) return;
-    setSavingId(`cat-${category.id}`);
-    try {
-      await endpoints.deleteComplaintCategory(category.id);
-      setMeta((current) => ({
-        ...current,
-        categories: current.categories.filter((item) => item.id !== category.id),
-        routingRules: current.routingRules.filter((item) => item.categoryId !== category.id)
-      }));
-      toast.success(`Category "${category.name}" was deleted.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not delete category'));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const saveRule = async (rule) => {
-    setSavingId(rule.id);
-    try {
-      const patch = {
-        officeId: ruleValue(rule, 'officeId'),
-        priority: ruleValue(rule, 'priority'),
-        slaDays: ruleValue(rule, 'slaDays')
-      };
-      const result = await endpoints.updateRoutingRule(rule.id, patch);
-      setMeta((current) => ({ ...current, routingRules: result.routingRules }));
-      clear(rule.id);
-      toast.success('Category routing updated.');
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not update category'));
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const createCategory = async (event) => {
-    event.preventDefault();
-    if (!newCategory.name.trim()) return;
-    setCreating(true);
-    try {
-      const category = await endpoints.createComplaintCategory(newCategory);
-      setMeta((current) => ({ ...current, categories: [...current.categories, category] }));
-      setNewCategory({ name: '', description: '', defaultPriority: 'Medium', slaDays: 3 });
-      toast.success(`Category "${category.name}" created. Add a routing rule for it in Routing Rules.`);
-    } catch (err) {
-      toast.error(errorMessage(err, 'Could not create category'));
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  if (!meta) return <LoadingState />;
-  return (
-    <div>
-      <PageHeader title="Categories & SLA" subtitle="Manage complaint categories, responsible office, priority, and response deadline control." />
-      <form onSubmit={createCategory} className="panel mb-6 grid gap-3 p-5 md:grid-cols-[1.2fr_1.6fr_0.8fr_0.6fr_auto]">
-        <Field label="New category name" value={newCategory.name} onChange={(value) => setNewCategory((c) => ({ ...c, name: value }))} placeholder="Example: Noise Complaint" />
-        <Field label="Description" value={newCategory.description} onChange={(value) => setNewCategory((c) => ({ ...c, description: value }))} placeholder="Short description" />
-        <label>
-          <span className="label">Default priority</span>
-          <select className="input" value={newCategory.defaultPriority} onChange={(event) => setNewCategory((c) => ({ ...c, defaultPriority: event.target.value }))}>
-            {['Low', 'Medium', 'High', 'Critical'].map((priority) => <option key={priority}>{priority}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="label">SLA days</span>
-          <input className="input" type="number" min="1" value={newCategory.slaDays} onChange={(event) => setNewCategory((c) => ({ ...c, slaDays: Number(event.target.value) }))} />
-        </label>
-        <div className="flex items-end">
-          <button className="btn-primary w-full" disabled={creating}><PlusCircle size={16} />{creating ? 'Adding...' : 'Add'}</button>
-        </div>
-      </form>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {meta.categories.map((category) => {
-          const rule = meta.routingRules.find((item) => item.categoryId === category.id);
-          return (
-            <article key={category.id} className="card p-5">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="font-bold text-slate-950">{category.name}</h2>
-                <div className="flex items-center gap-2">
-                  <StatusBadge value={rule?.priority || category.defaultPriority} />
-                  <button
-                    className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
-                    disabled={savingId === `cat-${category.id}`}
-                    onClick={() => removeCategory(category)}
-                    aria-label={`Delete ${category.name}`}
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 rounded-md border border-slate-200 p-3">
-                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Category details</p>
-                <Field label="Name" value={categoryValue(category, 'name')} onChange={(value) => setCategoryField(category.id, 'name', value)} />
-                <Field label="Description" value={categoryValue(category, 'description') || ''} onChange={(value) => setCategoryField(category.id, 'description', value)} />
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label>
-                    <span className="label">Default priority</span>
-                    <select className="input" value={categoryValue(category, 'defaultPriority')} onChange={(event) => setCategoryField(category.id, 'defaultPriority', event.target.value)}>
-                      {['Low', 'Medium', 'High', 'Critical'].map((priority) => <option key={priority}>{priority}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    <span className="label">SLA days</span>
-                    <input className="input" type="number" min="1" value={categoryValue(category, 'slaDays')} onChange={(event) => setCategoryField(category.id, 'slaDays', Number(event.target.value))} />
-                  </label>
-                </div>
-                {categoryDirty(category) && (
-                  <button className="btn-primary" disabled={savingId === `cat-${category.id}`} onClick={() => saveCategory(category)}>
-                    {savingId === `cat-${category.id}` ? 'Saving...' : 'Save Category'}
-                  </button>
+      {open && (
+        <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+          {canWork && (
+            <>
+              <div className="row-actions" style={{ marginTop: 0 }}>
+                {complaint.status === 'Assigned' && (
+                  <button type="button" className="btn sm" disabled={saving} onClick={() => setStatus('In Review')}>Start reviewing</button>
                 )}
+                <button type="button" className="btn ghost sm" disabled={saving} onClick={() => setStatus('Waiting for Citizen')}>Ask the citizen for more</button>
+                <button type="button" className="btn red sm" disabled={saving} onClick={escalate}>Escalate</button>
               </div>
+              <div style={{ marginTop: 12 }}>
+                <label className="label" htmlFor={`response-${complaint.id}`}>Official answer (the citizen is notified)</label>
+                <textarea
+                  id={`response-${complaint.id}`}
+                  className="input"
+                  style={{ minHeight: 80 }}
+                  value={response}
+                  onChange={(event) => setResponse(event.target.value)}
+                  placeholder="Write the answer from your office…"
+                />
+                <button type="button" className="btn green sm" style={{ marginTop: 8 }} disabled={saving || !response.trim()} onClick={resolve}>
+                  Mark as resolved
+                </button>
+                <small className="hint">
+                  Your first answer opens a private conversation with the citizen. Only the citizen can close the case, by confirming it is solved.
+                </small>
+              </div>
+            </>
+          )}
 
-              {rule ? (
-                <div className="mt-4 grid gap-3 rounded-md border border-slate-200 p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Routing rule</p>
-                  <label>
-                    <span className="label">Responsible office</span>
-                    <select className="input" value={ruleValue(rule, 'officeId')} onChange={(event) => setField(rule.id, 'officeId', event.target.value)}>
-                      {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-                    </select>
-                  </label>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label>
-                      <span className="label">Priority</span>
-                      <select className="input" value={ruleValue(rule, 'priority')} onChange={(event) => setField(rule.id, 'priority', event.target.value)}>
-                        {['Low', 'Medium', 'High', 'Critical'].map((priority) => <option key={priority}>{priority}</option>)}
-                      </select>
-                    </label>
-                    <label>
-                      <span className="label">SLA days</span>
-                      <input className="input" type="number" min="1" value={ruleValue(rule, 'slaDays')} onChange={(event) => setField(rule.id, 'slaDays', Number(event.target.value))} />
-                    </label>
-                  </div>
-                  {isDirty(rule) && (
-                    <button className="btn-primary" disabled={savingId === rule.id} onClick={() => saveRule(rule)}>
-                      {savingId === rule.id ? 'Saving...' : 'Save Changes'}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <p className="mt-4 text-xs font-semibold text-amber-600">No routing rule yet - add one in Complaint Routing.</p>
-              )}
-            </article>
-          );
-        })}
-      </div>
+          <div style={{ marginTop: 14 }}>
+            <label className="label">Conversation with the citizen</label>
+            <ComplaintChat complaint={complaint} onChange={onChange} readOnly={readOnly} />
+          </div>
+
+          <Timeline items={timelineOf(complaint)} />
+        </div>
+      )}
     </div>
   );
 };
+
+/* ══════════════ SHARED: NOTIFICATIONS ══════════════ */
 
 export const ComplaintNotifications = () => {
-  const [notifications, setNotifications] = useState([]);
-  useEffect(() => { endpoints.complaintNotifications().then(setNotifications); }, []);
+  const { refreshUnread } = useOutletContext() || {};
+  const [notifications, setNotifications] = useState(null);
+
+  useEffect(() => { endpoints.complaintNotifications().then(setNotifications).catch(() => setNotifications([])); }, []);
 
   const markRead = async (notification) => {
     if (notification.read) return;
     await endpoints.readNotification(notification.dbId).catch(() => {});
     setNotifications((items) => items.map((item) => (item.id === notification.id ? { ...item, read: true } : item)));
+    refreshUnread?.();
+  };
+
+  if (!notifications) return <LoadingState />;
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="Notifications" subtitle="Every update on your cases appears here." />
+      {notifications.length === 0
+        ? <Empty title="No notifications yet" subtitle="You will be told here whenever a case moves." />
+        : (
+          <div className="card" style={{ marginTop: 18 }}>
+            {notifications.map((notification) => (
+              <button
+                key={notification.id}
+                type="button"
+                className={`notif ${notification.read ? '' : 'unread'}`}
+                onClick={() => markRead(notification)}
+              >
+                <span className="notif-ico" aria-hidden="true">{notification.read ? '📄' : '🔔'}</span>
+                <span>
+                  <span style={{ fontSize: 14, fontWeight: 700, display: 'block' }}>{notification.title}</span>
+                  <span style={{ fontSize: 13, color: 'var(--muted)', display: 'block' }}>{notification.message}</span>
+                  <small className="hint">{notification.trackingNumber} · {formatDateTime(notification.createdAt)}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+    </div>
+  );
+};
+
+/* ══════════════ REPORTS (staff + admin) ══════════════ */
+
+const escapeReportValue = (value = '') => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#039;');
+
+const printableRows = (rows = [], emptyText = 'No records in this section.') => (
+  rows.length
+    ? rows.join('')
+    : `<tr><td colspan="6" class="empty-cell">${escapeReportValue(emptyText)}</td></tr>`
+);
+
+const printableBreakdownRows = (items = []) => printableRows(
+  items.map((item) => `
+    <tr>
+      <td>${escapeReportValue(item.name)}</td>
+      <td class="num">${escapeReportValue(item.value)}</td>
+    </tr>
+  `),
+  'No data recorded yet.'
+);
+
+const printableComplaintRows = (items = [], emptyText = 'No complaints to show.') => printableRows(
+  items.map((complaint) => `
+    <tr>
+      <td>${escapeReportValue(complaint.trackingNumber)}</td>
+      <td>${escapeReportValue(complaint.category)}</td>
+      <td>${escapeReportValue(complaint.assignedOffice)}</td>
+      <td>${escapeReportValue(complaint.priority)}</td>
+      <td>${escapeReportValue(complaint.status)}</td>
+      <td>${escapeReportValue(formatDate(complaint.dueDate))}</td>
+    </tr>
+  `),
+  emptyText
+);
+
+const printableAuditRows = (items = []) => printableRows(
+  items.map((log) => `
+    <tr>
+      <td>${escapeReportValue(formatDateTime(log.createdAt))}</td>
+      <td>${escapeReportValue(log.actor)}</td>
+      <td colspan="4">${escapeReportValue(log.action)}</td>
+    </tr>
+  `),
+  'No audit entries to show.'
+);
+
+const printableReportHtml = (reports, user) => {
+  const {
+    summary,
+    byCategory = [],
+    byStatus = [],
+    byOffice = [],
+    recentComplaints = [],
+    adminAttention = [],
+    auditLogs = []
+  } = reports;
+  const generatedAt = formatDateTime(new Date().toISOString());
+  const scope = user?.role === 'staff' ? 'Assigned office report' : 'Kacyiru Sector admin report';
+
+  return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Smart Citizen Complaint Report</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { font-family: Arial, sans-serif; color: #0f2537; margin: 28px; line-height: 1.35; }
+          .report-head { border-bottom: 3px solid #0ea5e9; padding-bottom: 14px; margin-bottom: 18px; }
+          h1 { font-size: 24px; margin: 0 0 6px; }
+          h2 { font-size: 16px; margin: 24px 0 8px; color: #0369a1; }
+          .muted { color: #5b7185; font-size: 12px; }
+          .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 16px 0 8px; }
+          .metric { border: 1px solid #dbeafe; border-radius: 8px; padding: 10px; background: #f8fcff; }
+          .metric b { display: block; font-size: 22px; color: #0369a1; }
+          .metric span { font-size: 11px; color: #5b7185; text-transform: uppercase; letter-spacing: .04em; }
+          table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; page-break-inside: avoid; }
+          th { text-align: left; background: #e0f2fe; color: #0f2537; border: 1px solid #bfdbfe; padding: 7px; }
+          td { border: 1px solid #dbeafe; padding: 7px; vertical-align: top; }
+          .num { text-align: right; font-weight: 700; }
+          .empty-cell { text-align: center; color: #5b7185; }
+          .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+          @page { margin: 16mm; }
+          @media print {
+            body { margin: 0; }
+            .no-print { display: none; }
+            .summary, .split { break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <button class="no-print" onclick="window.print()" style="float:right;padding:8px 12px;font-weight:700;">Print</button>
+        <section class="report-head">
+          <h1>Smart Citizen Complaint Report</h1>
+          <div class="muted">${escapeReportValue(scope)} | Generated by ${escapeReportValue(user?.fullName || 'Admin')} | ${escapeReportValue(generatedAt)}</div>
+        </section>
+
+        <section class="summary">
+          <div class="metric"><span>Total complaints</span><b>${escapeReportValue(summary.totalComplaints)}</b></div>
+          <div class="metric"><span>Solved / closed</span><b>${escapeReportValue(summary.resolved)}</b></div>
+          <div class="metric"><span>Pending / open</span><b>${escapeReportValue(summary.openComplaints)}</b></div>
+          <div class="metric"><span>Past due date</span><b>${escapeReportValue(summary.overdue)}</b></div>
+          <div class="metric"><span>Escalated</span><b>${escapeReportValue(summary.escalated)}</b></div>
+          <div class="metric"><span>Average rating</span><b>${escapeReportValue(summary.averageSatisfaction || '-')}</b></div>
+        </section>
+
+        <section class="split">
+          <div>
+            <h2>Complaints by status</h2>
+            <table><thead><tr><th>Status</th><th class="num">Count</th></tr></thead><tbody>${printableBreakdownRows(byStatus)}</tbody></table>
+          </div>
+          <div>
+            <h2>Complaints by category</h2>
+            <table><thead><tr><th>Category</th><th class="num">Count</th></tr></thead><tbody>${printableBreakdownRows(byCategory)}</tbody></table>
+          </div>
+        </section>
+
+        <h2>Complaints by responsible office</h2>
+        <table><thead><tr><th>Office</th><th class="num">Count</th></tr></thead><tbody>${printableBreakdownRows(byOffice)}</tbody></table>
+
+        <h2>Recent complaints</h2>
+        <table>
+          <thead><tr><th>Tracking number</th><th>Category</th><th>Office</th><th>Priority</th><th>Status</th><th>Due date</th></tr></thead>
+          <tbody>${printableComplaintRows(recentComplaints)}</tbody>
+        </table>
+
+        <h2>Needs attention</h2>
+        <table>
+          <thead><tr><th>Tracking number</th><th>Category</th><th>Office</th><th>Priority</th><th>Status</th><th>Due date</th></tr></thead>
+          <tbody>${printableComplaintRows(adminAttention, 'No overdue, escalated, or low-rated complaints need attention.')}</tbody>
+        </table>
+
+        <h2>Recent audit actions</h2>
+        <table>
+          <thead><tr><th>Time</th><th>Actor</th><th colspan="4">Action</th></tr></thead>
+          <tbody>${printableAuditRows(auditLogs)}</tbody>
+        </table>
+      </body>
+    </html>`;
+};
+
+export const AdminComplaintReports = () => {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [reports, setReports] = useState(null);
+
+  useEffect(() => { endpoints.complaintReports().then(setReports).catch(() => setReports(null)); }, []);
+
+  if (!reports) return <LoadingState />;
+
+  const { summary, byCategory, byOffice } = reports;
+  const totalByCategory = byCategory.reduce((sum, item) => sum + item.value, 0);
+  const totalByOffice = byOffice.reduce((sum, item) => sum + item.value, 0);
+  const printReport = () => {
+    const reportWindow = window.open('', 'smart-citizen-complaint-report', 'width=1100,height=800');
+    if (!reportWindow) {
+      toast.error('Allow pop-ups to print the report.');
+      return;
+    }
+    reportWindow.document.open();
+    reportWindow.document.write(printableReportHtml(reports, user));
+    reportWindow.document.close();
+    reportWindow.focus();
+    reportWindow.setTimeout(() => reportWindow.print(), 300);
+  };
+  const downloadReport = async (format) => {
+    try {
+      const response = await endpoints.downloadComplaintReport(format);
+      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const disposition = response.headers['content-disposition'] || '';
+      const fallback = `smart-citizen-complaint-report.${format === 'html' ? 'html' : 'csv'}`;
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] || fallback;
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not download the report'));
+    }
   };
 
   return (
-    <div>
-      <PageHeader title="Notifications" subtitle="Complaint submission, assignment, response, escalation, and closure updates." />
-      <div className="space-y-3">
-        {notifications.map((notification) => (
-          <article key={notification.id} className="card cursor-pointer p-4" onClick={() => markRead(notification)}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="font-bold text-slate-950">{notification.title}</h2>
-                <p className="mt-1 text-sm text-slate-500">{notification.message}</p>
-              </div>
-              <StatusBadge value={notification.read ? 'Read' : 'Unread'} />
-            </div>
-          </article>
-        ))}
-        {notifications.length === 0 && <p className="text-sm text-slate-500">No notifications yet.</p>}
+    <div style={{ marginTop: 22 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <PageTitle title="Reports" subtitle="How your cases are moving, and where they are stuck." />
+        <div className="row-actions" style={{ marginTop: 0 }}>
+          <button type="button" className="btn" onClick={printReport}>Print report</button>
+          <button type="button" className="btn ghost" onClick={() => downloadReport('csv')}>Download CSV</button>
+          <button type="button" className="btn ghost" onClick={() => downloadReport('html')}>Download document</button>
+        </div>
+      </div>
+      <div className="stats">
+        <Stat label="All complaints" value={summary.totalComplaints} />
+        <Stat label="Resolved / closed" value={summary.resolved} />
+        <Stat label="Still open" value={summary.openComplaints} />
+        <Stat label="Past due date" value={summary.overdue} danger />
+        <Stat label="Average rating" value={summary.averageSatisfaction || '—'} />
+      </div>
+
+      <div className="grid g2">
+        <div className="card">
+          <p className="card-t">Complaints by category</p>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {byCategory.map((item) => <Bar key={item.name} label={item.name} value={item.value} total={totalByCategory} />)}
+          </div>
+        </div>
+        <div className="card">
+          <p className="card-t">Complaints by office</p>
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {byOffice.length === 0
+              ? <small className="hint">No complaints have been routed yet.</small>
+              : byOffice.map((item) => <Bar key={item.name} label={item.name} value={item.value} total={totalByOffice} />)}
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-const ComplaintStats = ({ summary }) => (
-  <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
-    <StatCard label="Total" value={summary.totalComplaints} icon={FileText} />
-    <StatCard label="Open" value={summary.openComplaints} icon={ListChecks} tone="amber" />
-    <StatCard label="Escalated" value={summary.escalated} icon={AlertTriangle} tone="rose" />
-    <StatCard label="Needs Attention" value={summary.needsAdminAttention || 0} icon={AlertTriangle} tone="rose" />
-    <StatCard label="Resolved" value={summary.resolved} icon={CheckCircle2} tone="emerald" />
-    <StatCard label="Overdue" value={summary.overdue} icon={AlertTriangle} tone="violet" />
-    <StatCard label="Avg Rating" value={summary.averageSatisfaction} icon={Star} tone="blue" />
-  </div>
-);
+/* ══════════════ ADMIN: ALL COMPLAINTS ══════════════ */
 
-const ComplaintTable = ({ complaints = [], base = '/app/complaints', onDelete = null, busyId = null }) => (
-  <section className="panel overflow-x-auto">
-    <table className="w-full min-w-[760px] text-left text-sm">
-      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-        <tr>
-          <th className="px-4 py-3">Tracking</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Office</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Due</th>
-          {onDelete && <th className="px-4 py-3" />}
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-slate-100">
-        {complaints.map((complaint) => (
-          <tr key={complaint.trackingNumber}>
-            <td className="px-4 py-3 font-semibold text-slate-900"><Link to={`${base}/${complaint.trackingNumber}`} className="hover:text-brand-600">{complaint.trackingNumber}</Link></td>
-            <td className="px-4 py-3"><StatusBadge value={complaint.type} /></td>
-            <td className="px-4 py-3 text-slate-500">{complaint.assignedOffice}</td>
-            <td className="px-4 py-3"><StatusBadge value={complaint.status} /></td>
-            <td className="px-4 py-3 text-slate-500">{complaint.dueDate}</td>
-            {onDelete && (
-              <td className="px-4 py-3">
-                <button
-                  className="grid h-8 w-8 place-items-center rounded-md border border-red-100 text-red-600 hover:bg-red-50"
-                  disabled={busyId === complaint.trackingNumber}
-                  onClick={() => onDelete(complaint)}
-                  aria-label={`Delete ${complaint.trackingNumber}`}
-                >
-                  <Trash2 size={15} />
-                </button>
-              </td>
-            )}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  </section>
-);
+export const AdminComplaints = () => {
+  const toast = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [complaints, setComplaints] = useState(null);
+  const [meta, setMeta] = useState({ categories: [], offices: [] });
+  const [query, setQuery] = useState(searchParams.get('q') || searchParams.get('query') || '');
+  const [status, setStatus] = useState(searchParams.get('statusGroup') === 'resolved' ? 'resolved' : searchParams.get('status') || 'all');
+  const [categoryId, setCategoryId] = useState(searchParams.get('categoryId') || 'all');
+  const [officeId, setOfficeId] = useState(searchParams.get('officeId') || 'all');
+  const [priority, setPriority] = useState(searchParams.get('priority') || 'all');
+  const [overdueOnly, setOverdueOnly] = useState(searchParams.get('overdue') === 'true');
+  const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') || '');
+  const [dateTo, setDateTo] = useState(searchParams.get('dateTo') || '');
 
-const Field = ({ label, value, onChange = () => {}, placeholder = '', readOnly = false }) => (
-  <label>
-    <span className="label">{label}</span>
-    <input className="input" value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
-  </label>
-);
+  const load = () => endpoints.complaints().then(setComplaints).catch(() => setComplaints([]));
+  useEffect(() => {
+    load();
+    endpoints.complaintMeta().then(setMeta).catch(() => {});
+  }, []);
 
-const Info = ({ label, value }) => (
-  <div className="mt-4">
-    <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{label}</p>
-    <p className="mt-1 text-sm font-semibold text-slate-700">{value}</p>
-  </div>
-);
+  useEffect(() => {
+    setQuery(searchParams.get('q') || searchParams.get('query') || '');
+    setStatus(searchParams.get('statusGroup') === 'resolved' ? 'resolved' : searchParams.get('status') || 'all');
+    setCategoryId(searchParams.get('categoryId') || 'all');
+    setOfficeId(searchParams.get('officeId') || 'all');
+    setPriority(searchParams.get('priority') || 'all');
+    setOverdueOnly(searchParams.get('overdue') === 'true');
+    setDateFrom(searchParams.get('dateFrom') || '');
+    setDateTo(searchParams.get('dateTo') || '');
+  }, [searchParams]);
 
-const StaffStat = ({ label, value, color }) => (
-  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-    <p className="text-xs font-semibold text-slate-500">{label}</p>
-    <p className="mt-1 text-2xl font-bold text-slate-950">{value}</p>
-    <span className={`mt-3 block h-1.5 rounded-full ${color}`} />
-  </div>
-);
+  if (!complaints) return <LoadingState />;
 
-const SimpleRows = ({ data = [], color = 'bg-brand-600' }) => {
-  const max = Math.max(1, ...data.map((item) => Number(item.value || 0)));
+  const remove = async (trackingNumber) => {
+    try {
+      await endpoints.deleteComplaint(trackingNumber);
+      toast.success(`${trackingNumber} was deleted.`);
+      load();
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not delete the complaint'));
+    }
+  };
+
+  const term = query.trim().toLowerCase();
+  const rows = complaints.filter((complaint) => {
+    const matchesStatus = status === 'resolved'
+      ? ['Resolved', 'Closed'].includes(complaint.status)
+      : status === 'all' || complaint.status === status;
+    const matchesCategory = categoryId === 'all' || String(complaint.categoryId) === String(categoryId);
+    const matchesOffice = officeId === 'all' || String(complaint.assignedOfficeId) === String(officeId);
+    const matchesPriority = priority === 'all' || complaint.priority === priority;
+    const matchesOverdue = !overdueOnly || isOverdue(complaint);
+    const createdDate = complaint.createdAt ? complaint.createdAt.slice(0, 10) : '';
+    const matchesDateFrom = !dateFrom || createdDate >= dateFrom;
+    const matchesDateTo = !dateTo || createdDate <= dateTo;
+    const matchesTerm = !term
+      || complaint.trackingNumber.toLowerCase().includes(term)
+      || (complaint.description || '').toLowerCase().includes(term)
+      || (complaint.assignedOffice || '').toLowerCase().includes(term)
+      || (complaint.citizenName || '').toLowerCase().includes(term);
+    return matchesStatus
+      && matchesCategory
+      && matchesOffice
+      && matchesPriority
+      && matchesOverdue
+      && matchesDateFrom
+      && matchesDateTo
+      && matchesTerm;
+  });
+
   return (
-    <div className="mt-3 space-y-3">
-      {data.map((item) => (
-        <div key={item.name}>
-          <div className="mb-1 flex items-center justify-between gap-3 text-xs">
-            <span className="font-semibold text-slate-700">{item.name}</span>
-            <span className="text-slate-500">{item.value}</span>
-          </div>
-          <div className="h-2 rounded-full bg-slate-100">
-            <div className={`h-2 rounded-full ${color}`} style={{ width: `${Math.max(8, (Number(item.value || 0) / max) * 100)}%` }} />
-          </div>
-        </div>
-      ))}
+    <div style={{ marginTop: 22 }}>
+      <PageTitle title="All complaints" subtitle="Every case in the sector, whichever office holds it." />
+      <div className="toolbar">
+        <input
+          className="input search"
+          placeholder="Search a tracking number, office, citizen or word…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <select className="input" style={{ maxWidth: 240 }} value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="resolved">Resolved / Closed</option>
+          {['Assigned', 'In Review', 'Waiting for Citizen', 'Escalated', 'Resolved', 'Closed'].map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <select className="input" style={{ maxWidth: 260 }} value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
+          <option value="all">All categories</option>
+          {meta.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+        </select>
+        <select className="input" style={{ maxWidth: 260 }} value={officeId} onChange={(event) => setOfficeId(event.target.value)}>
+          <option value="all">All offices</option>
+          {meta.offices.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+        </select>
+        <select className="input" style={{ maxWidth: 160 }} value={priority} onChange={(event) => setPriority(event.target.value)}>
+          <option value="all">All priorities</option>
+          {['Low', 'Medium', 'High', 'Critical'].map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+        <input className="input" style={{ maxWidth: 170 }} type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} aria-label="Submitted from" />
+        <input className="input" style={{ maxWidth: 170 }} type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} aria-label="Submitted to" />
+        <button type="button" className={`tab ${overdueOnly ? 'active' : ''}`} onClick={() => setOverdueOnly((value) => !value)}>
+          Past due only
+        </button>
+        <button
+          type="button"
+          className="btn ghost sm"
+          onClick={() => {
+            setQuery('');
+            setStatus('all');
+            setCategoryId('all');
+            setOfficeId('all');
+            setPriority('all');
+            setOverdueOnly(false);
+            setDateFrom('');
+            setDateTo('');
+            setSearchParams({});
+          }}
+        >
+          Clear filters
+        </button>
+      </div>
+
+      <div className="card table-wrap" style={{ marginTop: 16 }}>
+        <table className="data">
+          <thead>
+            <tr>
+              <th>Tracking number</th>
+              <th>Category</th>
+              <th>Office</th>
+              <th>Due date</th>
+              <th>Status</th>
+              <th aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((complaint) => (
+              <tr key={complaint.id}>
+                <td><Link className="scf" to={`/admin/complaints/${complaint.trackingNumber}`}>{complaint.trackingNumber}</Link></td>
+                <td>{complaint.category}</td>
+                <td style={{ fontSize: 12.5 }}>{complaint.assignedOffice}</td>
+                <td>
+                  {formatDate(complaint.dueDate)}
+                  {isOverdue(complaint) && <span className="over" style={{ marginLeft: 6 }}>!</span>}
+                </td>
+                <td><Badge value={complaint.status} /></td>
+                <td>
+                  <div className="row-actions compact">
+                    <Link className="btn ghost sm" to={`/admin/complaints/${complaint.trackingNumber}`}>View details</Link>
+                    <button type="button" className="btn red sm" onClick={() => remove(complaint.trackingNumber)}>Delete</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {rows.length === 0 && <p style={{ padding: 24, textAlign: 'center', color: 'var(--muted)' }}>No complaint matched your search.</p>}
+      </div>
     </div>
   );
 };
-
-const StaffAction = ({ to, label }) => (
-  <Link to={to} className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-center text-xs font-bold text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100">
-    {label}
-  </Link>
-);

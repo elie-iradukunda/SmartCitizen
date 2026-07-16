@@ -1,62 +1,144 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { MailCheck } from 'lucide-react';
-import { api } from '../../api/client.js';
-import { BrandLogo } from '../../components/BrandLogo.jsx';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { endpoints } from '../../api/client.js';
 import { LanguageSwitcher } from '../../components/LanguageSwitcher.jsx';
-import { errorMessage } from '../../context/ToastContext.jsx';
+import { useToast, errorMessage } from '../../context/ToastContext.jsx';
 
 export const ForgotPassword = () => {
   const [email, setEmail] = useState('');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [sent, setSent] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const submit = async (event) => {
     event.preventDefault();
     setError('');
+    setSaving(true);
     try {
-      const { data } = await api.post('/auth/forgot-password', { email });
-      setMessage(data.message);
+      setSent(await endpoints.forgotPassword(email));
     } catch (err) {
-      setError(errorMessage(err, 'Could not send reset link'));
+      setError(errorMessage(err, 'Could not send the reset link'));
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <main className="grid min-h-screen place-items-center bg-slate-50 px-4 py-10">
-      <form onSubmit={submit} className="panel w-full max-w-md p-6">
-        <div className="flex items-center justify-between gap-4">
-          <BrandLogo />
+    <main className="auth-wrap">
+      <form onSubmit={submit} className="auth-card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div className="logo-mark sky-grad" aria-hidden="true">SC</div>
           <LanguageSwitcher />
         </div>
-        <h1 className="mt-8 text-2xl font-bold text-slate-950">Forgot Password</h1>
-        <p className="mt-1 text-sm text-slate-500">Enter your email to generate a demo reset link.</p>
-        <label className="mt-6 block">
-          <span className="label">Email</span>
-          <input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
-        </label>
-        {message && <p className="mt-4 rounded-md bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">{message}</p>}
-        {error && <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p>}
-        <button className="btn-primary mt-6 w-full"><MailCheck size={17} />Send Reset Link</button>
-        <Link to="/login" className="mt-4 block text-center text-sm font-semibold text-brand-600">Back to login</Link>
+        <h1 className="auth-title">Forgot password</h1>
+        <p className="auth-sub">Enter your email and we will generate a reset link that works once and expires.</p>
+
+        <div className="field">
+          <label className="label" htmlFor="reset-email">Email</label>
+          <input id="reset-email" className="input" type="email" value={email} required onChange={(event) => setEmail(event.target.value)} />
+        </div>
+
+        {error && <p className="err">{error}</p>}
+
+        <button className="btn block lg" style={{ marginTop: 16 }} disabled={saving}>
+          {saving ? 'Sending…' : 'Send reset link'}
+        </button>
+
+        {sent && (
+          <div className="track-box">
+            <p className="track-h"><span aria-hidden="true">📩</span> {sent.message}</p>
+            {sent.resetLink && (
+              <>
+                <p style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 8 }}>
+                  There is no mail server in this prototype, so the link is shown here. It expires in 30 minutes and can be used once.
+                </p>
+                <Link className="btn sm" style={{ marginTop: 10 }} to={sent.resetLink}>Open the reset link</Link>
+              </>
+            )}
+          </div>
+        )}
+
+        <p style={{ marginTop: 16, textAlign: 'center', fontSize: 13, fontWeight: 600 }}>
+          <Link to="/login" style={{ color: 'var(--sky-700)' }}>Back to login</Link>
+        </p>
       </form>
     </main>
   );
 };
 
-export const VerifyOtp = () => (
-  <main className="grid min-h-screen place-items-center bg-slate-50 px-4 py-10">
-    <div className="panel w-full max-w-md p-6">
-      <div className="flex items-center justify-between gap-4">
-        <BrandLogo />
-        <LanguageSwitcher />
-      </div>
-      <h1 className="mt-8 text-2xl font-bold text-slate-950">OTP Verification</h1>
-      <p className="mt-1 text-sm text-slate-500">Use OTP code 123456 for demo verification.</p>
-      <div className="mt-6 grid grid-cols-6 gap-2">
-        {Array.from({ length: 6 }).map((_, index) => <input key={index} className="input text-center text-lg font-bold" maxLength={1} defaultValue={index === 0 ? '1' : ''} />)}
-      </div>
-      <Link to="/login" className="btn-primary mt-6 w-full">Verify OTP</Link>
-    </div>
-  </main>
-);
+export const ResetPassword = () => {
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const email = params.get('email') || '';
+  const token = params.get('token') || '';
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (password !== confirm) return setError('The two passwords are not the same.');
+    setError('');
+    setSaving(true);
+    try {
+      const result = await endpoints.resetPassword({ email, token, password });
+      toast.success(result.message);
+      navigate('/login');
+    } catch (err) {
+      setError(errorMessage(err, 'Could not change your password'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <main className="auth-wrap">
+      <form onSubmit={submit} className="auth-card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div className="logo-mark sky-grad" aria-hidden="true">SC</div>
+          <LanguageSwitcher />
+        </div>
+        <h1 className="auth-title">Choose a new password</h1>
+        <p className="auth-sub">{email || 'Open this page from the reset link you were given.'}</p>
+
+        <div className="field">
+          <label className="label" htmlFor="new-password">New password</label>
+          <input
+            id="new-password"
+            className="input"
+            type="password"
+            value={password}
+            required
+            minLength={6}
+            onChange={(event) => { setPassword(event.target.value); setError(''); }}
+          />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="confirm-password">Repeat the password</label>
+          <input
+            id="confirm-password"
+            className="input"
+            type="password"
+            value={confirm}
+            required
+            onChange={(event) => { setConfirm(event.target.value); setError(''); }}
+          />
+        </div>
+
+        <small className="hint" style={{ marginTop: 10 }}>At least 6 characters.</small>
+        {error && <p className="err">{error}</p>}
+
+        <button className="btn block lg" style={{ marginTop: 16 }} disabled={saving || !token || !email}>
+          {saving ? 'Saving…' : 'Change my password'}
+        </button>
+
+        <p style={{ marginTop: 16, textAlign: 'center', fontSize: 13, fontWeight: 600 }}>
+          <Link to="/login" style={{ color: 'var(--sky-700)' }}>Back to login</Link>
+        </p>
+      </form>
+    </main>
+  );
+};

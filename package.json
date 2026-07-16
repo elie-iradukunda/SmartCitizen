@@ -4,12 +4,18 @@
   "private": true,
   "description": "Full-stack Smart Citizen Idea & Innovation Portal",
   "scripts": {
-    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "//install:all": "Used by the Railway build. The backend needs no dev dependencies to run, so they are skipped: that keeps nodemon and sqlite3 (a native module, tests only) out of the deploy entirely. The frontend keeps its dev dependencies because vite and tailwind are what build it.",
+    "install:all": "npm install --omit=dev --prefix backend && npm install --prefix frontend",
+    "setup": "npm install --prefix backend && npm install --prefix frontend",
     "dev": "node ./node_modules/concurrently/dist/bin/concurrently.js \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "build": "npm run build --prefix frontend",
-    "start": "npm run start --prefix backend"
+    "start": "npm run start --prefix backend",
+    "test": "npm run test --prefix backend && npm run build --prefix frontend",
+    "test:api": "node scripts/integration-test.mjs",
+    "test:ui:live": "node scripts/live-ui-test.mjs"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "playwright-core": "^1.61.1"
   }
 }

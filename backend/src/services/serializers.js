@@ -1,7 +1,7 @@
 export const publicUser = (user) => {
   if (!user) return null;
   const plain = user.toJSON ? user.toJSON() : user;
-  const { password, createdAt, updatedAt, ...safe } = plain;
+  const { password, resetTokenHash, resetTokenExpiry, createdAt, updatedAt, ...safe } = plain;
   return safe;
 };
 

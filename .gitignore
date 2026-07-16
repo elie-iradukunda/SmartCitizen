@@ -12,12 +12,24 @@ dist/
 test-results/
 test-screenshots/
 .chrome-live-test-profile/
+.chrome-live-test-profile-2/
+.mysql-test-data-*/
+mysql-test-dir.txt
+mysql-install-test.out
 .claude/
 .railway/
 
 # Generated book/doc backups are not needed for app hosting
 Book/
 Backup book/
+
+# Stray copies that nothing imports: an older nested checkout and loose downloads that
+# landed next to the real backend. The app is backend/src - these are not part of it.
+backend/scfcms-backend/
+backend/index.js
+backend/routing.js
+backend/complaint.service.js
+backend/routes (1).js
 
 # Uploaded files should stay local
 backend/uploads/*

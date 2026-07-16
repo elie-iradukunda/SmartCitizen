@@ -4,7 +4,10 @@ import { translateText } from '../i18n/index.js';
 
 const originalText = new WeakMap();
 const translatableAttributes = ['placeholder', 'aria-label', 'title', 'alt'];
-const ignoredParents = new Set(['SCRIPT', 'STYLE', 'TEXTAREA']);
+// Text inside a textarea is the user's own value, so it is never translated. The element
+// itself still is, otherwise its placeholder would stay in English.
+const ignoredTextParents = new Set(['SCRIPT', 'STYLE', 'TEXTAREA']);
+const ignoredElements = new Set(['SCRIPT', 'STYLE']);
 
 const translateTextNode = (node, language) => {
   const value = node.nodeValue || '';
@@ -61,7 +64,7 @@ const translateAttributes = (element, language) => {
 const walkAndTranslate = (root, language) => {
   if (!root) return;
   if (root.nodeType === Node.TEXT_NODE) {
-    if (!ignoredParents.has(root.parentElement?.tagName)) translateTextNode(root, language);
+    if (!ignoredTextParents.has(root.parentElement?.tagName)) translateTextNode(root, language);
     return;
   }
   if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE) return;
@@ -70,8 +73,8 @@ const walkAndTranslate = (root, language) => {
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
     acceptNode(node) {
-      if (node.nodeType === Node.TEXT_NODE && ignoredParents.has(node.parentElement?.tagName)) return NodeFilter.FILTER_REJECT;
-      if (node.nodeType === Node.ELEMENT_NODE && ignoredParents.has(node.tagName)) return NodeFilter.FILTER_REJECT;
+      if (node.nodeType === Node.TEXT_NODE && ignoredTextParents.has(node.parentElement?.tagName)) return NodeFilter.FILTER_REJECT;
+      if (node.nodeType === Node.ELEMENT_NODE && ignoredElements.has(node.tagName)) return NodeFilter.FILTER_REJECT;
       return NodeFilter.FILTER_ACCEPT;
     }
   });

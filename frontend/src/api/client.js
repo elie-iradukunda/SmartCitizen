@@ -40,8 +40,13 @@ export const endpoints = {
   getProfile: () => unwrap(api.get('/auth/me')),
   updateProfile: (payload) => unwrap(api.patch('/auth/me', payload)),
 
-  // Public
+  // Public (no account needed)
   publicSummary: () => unwrap(api.get('/complaints/public-summary')),
+  publicFeedback: (params) => unwrap(api.get('/complaints/public-feedback', { params })),
+  trackComplaint: (trackingNumber) => unwrap(api.get(`/complaints/public-track/${encodeURIComponent(trackingNumber)}`)),
+  submitAnonymously: (payload) => unwrap(api.post('/complaints/public', payload)),
+  forgotPassword: (email) => unwrap(api.post('/auth/forgot-password', { email })),
+  resetPassword: (payload) => unwrap(api.post('/auth/reset-password', payload)),
 
   // Complaints (citizen + staff + admin)
   complaintMeta: () => unwrap(api.get('/complaints/meta')),
@@ -59,8 +64,16 @@ export const endpoints = {
   updateComplaintStatus: (trackingNumber, payload) => unwrap(api.patch(`/complaints/${trackingNumber}/status`, payload)),
   deleteComplaint: (trackingNumber) => unwrap(api.delete(`/complaints/${trackingNumber}`)),
   escalateComplaint: (trackingNumber, payload) => unwrap(api.post(`/complaints/${trackingNumber}/escalate`, payload)),
+  complaintMessages: (trackingNumber) => unwrap(api.get(`/complaints/${trackingNumber}/messages`)),
+  sendComplaintMessage: (trackingNumber, body) => unwrap(api.post(`/complaints/${trackingNumber}/messages`, { body })),
+  requestEscalation: (trackingNumber, payload) => unwrap(api.post(`/complaints/${trackingNumber}/request-escalation`, payload)),
   rateComplaint: (trackingNumber, payload) => unwrap(api.post(`/complaints/${trackingNumber}/rate`, payload)),
   complaintReports: () => unwrap(api.get('/complaints/reports')),
+  downloadComplaintReport: (format = 'csv') => api.get('/complaints/reports/export', {
+    params: { format },
+    responseType: 'blob'
+  }),
+  runSlaCheck: () => unwrap(api.post('/complaints/sla-check')),
   complaintNotifications: () => unwrap(api.get('/complaints/notifications')),
   complaintAuditLogs: () => unwrap(api.get('/complaints/audit-logs')),
   createRoutingRule: (payload) => unwrap(api.post('/complaints/routing-rules', payload)),

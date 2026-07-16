@@ -1,10 +1,14 @@
 import { Router } from 'express';
 import multer from 'multer';
+import fs from 'fs';
 import path from 'path';
 import { complaintController } from '../controllers/complaintController.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
+const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+const maxUploadMb = Number(process.env.MAX_UPLOAD_MB || 100);
+fs.mkdirSync(uploadDir, { recursive: true });
 const extensionFromMime = (mime = '') => {
   if (mime.includes('webm')) return '.webm';
   if (mime.includes('ogg')) return '.ogg';
@@ -27,7 +31,7 @@ const allowedUpload = (file) => (
   || file.mimetype === 'application/pdf'
 );
 const storage = multer.diskStorage({
-  destination: 'uploads/',
+  destination: uploadDir,
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname || '') || extensionFromMime(file.mimetype);
     cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
@@ -35,7 +39,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024, files: 2 },
+  limits: { fileSize: maxUploadMb * 1024 * 1024, files: 2 },
   fileFilter: (req, file, cb) => {
     if (allowedUpload(file)) return cb(null, true);
     return cb(new Error('Only image, video, audio, or PDF evidence files are allowed.'));
@@ -47,16 +51,21 @@ const complaintUploads = upload.fields([
 ]);
 
 router.get('/public-summary', complaintController.publicSummary);
+router.get('/public-feedback', complaintController.publicFeedback);
+router.get('/public-track/:trackingNumber', complaintController.publicTrack);
+router.post('/public', complaintUploads, complaintController.createAnonymous);
 
 router.use(requireAuth);
 
 router.get('/meta', complaintController.meta);
 router.get('/my', requireRole('citizen'), complaintController.mine);
 router.get('/reports', requireRole('staff', 'admin'), complaintController.reports);
+router.get('/reports/export', requireRole('staff', 'admin'), complaintController.reportExport);
 router.get('/notifications', complaintController.notifications);
 router.patch('/notifications/:id/read', complaintController.markRead);
 router.get('/notifications/unread-count', complaintController.unreadCount);
 router.get('/audit-logs', requireRole('admin'), complaintController.auditLogs);
+router.post('/sla-check', requireRole('admin'), complaintController.slaCheck);
 router.get('/', requireRole('staff', 'admin'), complaintController.list);
 router.get('/:trackingNumber', complaintController.find);
 router.post('/', requireRole('citizen'), complaintUploads, complaintController.create);
@@ -72,6 +81,9 @@ router.delete('/routing-rules/:id', requireRole('admin'), complaintController.de
 router.delete('/:trackingNumber', requireRole('admin'), complaintController.remove);
 router.patch('/:trackingNumber/status', requireRole('staff', 'admin'), complaintController.update);
 router.post('/:trackingNumber/escalate', requireRole('staff', 'admin'), complaintController.escalate);
+router.get('/:trackingNumber/messages', complaintController.messages);
+router.post('/:trackingNumber/messages', complaintController.sendMessage);
+router.post('/:trackingNumber/request-escalation', requireRole('citizen'), complaintController.requestEscalation);
 router.post('/:trackingNumber/rate', requireRole('citizen'), complaintController.rate);
 
 export default router;

@@ -1,8 +1,9 @@
 import sequelize from '../config/database.js';
-import { defineAuditLog } from './SupportingModels.js';
+import { defineAuditLog, defineCounter } from './SupportingModels.js';
 import {
   defineComplaint,
   defineComplaintCategory,
+  defineComplaintMessage,
   defineComplaintNotification,
   defineComplaintResponse,
   defineOffice,
@@ -17,9 +18,11 @@ export const Office = defineOffice(sequelize);
 export const RoutingRule = defineRoutingRule(sequelize);
 export const Complaint = defineComplaint(sequelize);
 export const ComplaintResponse = defineComplaintResponse(sequelize);
+export const ComplaintMessage = defineComplaintMessage(sequelize);
 export const SatisfactionRating = defineSatisfactionRating(sequelize);
 export const ComplaintNotification = defineComplaintNotification(sequelize);
 export const AuditLog = defineAuditLog(sequelize);
+export const Counter = defineCounter(sequelize);
 
 User.hasMany(Complaint, { foreignKey: 'citizenId', as: 'complaints' });
 Complaint.belongsTo(User, { foreignKey: 'citizenId', as: 'citizen' });
@@ -45,6 +48,12 @@ ComplaintResponse.belongsTo(Complaint, { foreignKey: 'complaintId', as: 'complai
 User.hasMany(ComplaintResponse, { foreignKey: 'responderId', as: 'complaintResponses' });
 ComplaintResponse.belongsTo(User, { foreignKey: 'responderId', as: 'responderUser' });
 
+Complaint.hasMany(ComplaintMessage, { foreignKey: 'complaintId', as: 'messages' });
+ComplaintMessage.belongsTo(Complaint, { foreignKey: 'complaintId', as: 'complaint' });
+
+User.hasMany(ComplaintMessage, { foreignKey: 'senderId', as: 'complaintMessages' });
+ComplaintMessage.belongsTo(User, { foreignKey: 'senderId', as: 'sender' });
+
 Complaint.hasOne(SatisfactionRating, { foreignKey: 'complaintId', as: 'satisfaction' });
 SatisfactionRating.belongsTo(Complaint, { foreignKey: 'complaintId', as: 'complaint' });
 
@@ -60,9 +69,11 @@ export const models = {
   RoutingRule,
   Complaint,
   ComplaintResponse,
+  ComplaintMessage,
   SatisfactionRating,
   ComplaintNotification,
-  AuditLog
+  AuditLog,
+  Counter
 };
 
 export { sequelize };

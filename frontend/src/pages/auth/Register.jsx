@@ -1,114 +1,139 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { UserPlus } from 'lucide-react';
-import { BrandLogo } from '../../components/BrandLogo.jsx';
 import { LanguageSwitcher } from '../../components/LanguageSwitcher.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { useToast, errorMessage } from '../../context/ToastContext.jsx';
 import { kacyiruDefaults, kacyiruLocation, villagesForCell } from '../../data/kacyiruLocations.js';
 
+// A citizen account stands for a real resident of the sector, so registration asks for the
+// identity and the address up front: the National ID is what ties a complaint to a person,
+// and the cell and village are what tell an office where the problem actually is.
 const initial = {
   fullName: '',
   email: '',
   phone: '',
   nationalId: '',
-  gender: '',
+  password: '',
   ...kacyiruDefaults,
-  address: '',
-  preferredLanguage: 'Kinyarwanda',
-  password: ''
+  preferredLanguage: 'Kinyarwanda'
 };
+
+const NATIONAL_ID_DIGITS = 16;
+const digitsOf = (value) => String(value || '').replace(/\D/g, '');
+// Shown back in the 4-digit groups printed on the card, which is how a citizen reads it
+// while typing. Only the digits are submitted.
+const formatNationalId = (value) => digitsOf(value).slice(0, NATIONAL_ID_DIGITS).replace(/(.{4})/g, '$1 ').trim();
 
 export const Register = () => {
   const [form, setForm] = useState(initial);
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const { register } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
 
-  const submit = async (event) => {
-    event.preventDefault();
-    setError('');
-    try {
-      const user = await register(form);
-      toast.success(`Welcome, ${user.fullName}. Your citizen account is ready.`);
-      navigate('/app/dashboard');
-    } catch (err) {
-      setError(errorMessage(err, 'Registration failed'));
-    }
-  };
-
   const update = (field, value) => setForm((current) => {
-    if (field === 'cell') {
-      return { ...current, cell: value, village: villagesForCell(value)[0] || '' };
-    }
+    // Villages belong to one cell, so changing the cell must not leave the old village behind.
+    if (field === 'cell') return { ...current, cell: value, village: villagesForCell(value)[0] || '' };
     return { ...current, [field]: value };
   });
 
+  const idDigits = digitsOf(form.nationalId);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setError('');
+    if (idDigits.length !== NATIONAL_ID_DIGITS) {
+      setError(`The National ID must be ${NATIONAL_ID_DIGITS} digits.`);
+      return;
+    }
+    setSaving(true);
+    try {
+      const user = await register({ ...form, nationalId: idDigits });
+      toast.success(`Welcome, ${user.fullName}. Your citizen account is ready.`);
+      navigate('/app/submit-complaint');
+    } catch (err) {
+      setError(errorMessage(err, 'Registration failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-10">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <BrandLogo />
+    <main className="auth-wrap">
+      <form onSubmit={submit} className="auth-card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div className="logo-mark sky-grad" aria-hidden="true">SC</div>
           <LanguageSwitcher />
         </div>
-        <form onSubmit={submit} className="panel p-6 sm:p-8">
-          <h1 className="text-2xl font-bold text-slate-950">Create Citizen Account</h1>
-          <p className="mt-1 text-sm text-slate-500">Register to submit complaints or feedback, track status, receive responses, and rate resolution.</p>
-          <p className="mt-2 rounded-md bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700">Case study area: Gasabo District - Kacyiru Sector. Choose your cell and village so the office knows where the issue is.</p>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <Field label="Full Name" value={form.fullName} onChange={(value) => update('fullName', value)} required />
-            <Field label="Email" type="email" value={form.email} onChange={(value) => update('email', value)} required />
-            <Field label="Phone" value={form.phone} onChange={(value) => update('phone', value)} />
-            <Field label="National ID / Citizen ID" value={form.nationalId} onChange={(value) => update('nationalId', value)} />
-            <label>
-              <span className="label">Gender</span>
-              <select className="input" value={form.gender} onChange={(event) => update('gender', event.target.value)}>
-                <option value="">Select gender</option>
-                <option>Female</option>
-                <option>Male</option>
-                <option>Other</option>
-              </select>
-            </label>
-            <Field label="Province" value={form.province} readOnly />
-            <Field label="District" value={form.district} readOnly />
-            <Field label="Sector" value={form.sector} readOnly />
-            <label>
-              <span className="label">Cell</span>
-              <select className="input" value={form.cell} onChange={(event) => update('cell', event.target.value)} required>
-                {kacyiruLocation.cells.map((cell) => <option key={cell.name}>{cell.name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="label">Village</span>
-              <select className="input" value={form.village} onChange={(event) => update('village', event.target.value)} required>
-                {villagesForCell(form.cell).map((village) => <option key={village}>{village}</option>)}
-              </select>
-            </label>
-            <Field label="Address / Street" value={form.address} onChange={(value) => update('address', value)} />
-            <label>
-              <span className="label">Preferred Language</span>
-              <select className="input" value={form.preferredLanguage} onChange={(event) => update('preferredLanguage', event.target.value)}>
-                <option>Kinyarwanda</option>
-                <option>English</option>
-              </select>
-            </label>
-            <Field label="Password" type="password" value={form.password} onChange={(value) => update('password', value)} required />
+        <h1 className="auth-title">Create citizen account</h1>
+        <p className="auth-sub">Fill in your details, then you can submit a complaint straight away.</p>
+
+        <div className="field">
+          <label className="label" htmlFor="reg-name">Full name</label>
+          <input id="reg-name" className="input" value={form.fullName} required onChange={(event) => update('fullName', event.target.value)} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="reg-email">Email</label>
+          <input id="reg-email" className="input" type="email" value={form.email} required onChange={(event) => update('email', event.target.value)} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="reg-phone">Phone</label>
+          <input id="reg-phone" className="input" value={form.phone} required placeholder="+250 7…" onChange={(event) => update('phone', event.target.value)} />
+        </div>
+        <div className="field">
+          <label className="label" htmlFor="reg-id">National ID</label>
+          <input
+            id="reg-id"
+            className="input"
+            inputMode="numeric"
+            value={formatNationalId(form.nationalId)}
+            required
+            placeholder="1199 8012 3456 7890"
+            onChange={(event) => update('nationalId', digitsOf(event.target.value))}
+          />
+          <small className="hint">{idDigits.length} of {NATIONAL_ID_DIGITS} digits</small>
+        </div>
+
+        <div className="field">
+          <label className="label" htmlFor="reg-sector">Sector</label>
+          <select id="reg-sector" className="input" value={form.sector} required onChange={(event) => update('sector', event.target.value)}>
+            <option value={kacyiruLocation.sector}>{kacyiruLocation.sector}</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr' }}>
+          <div className="field">
+            <label className="label" htmlFor="reg-cell">Cell</label>
+            <select id="reg-cell" className="input" value={form.cell} required onChange={(event) => update('cell', event.target.value)}>
+              {kacyiruLocation.cells.map((cell) => <option key={cell.name}>{cell.name}</option>)}
+            </select>
           </div>
-          {error && <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">{error}</p>}
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-            <Link to="/login" className="text-sm font-semibold text-slate-600">Already have an account?</Link>
-            <button className="btn-primary"><UserPlus size={17} />Register</button>
+          <div className="field">
+            <label className="label" htmlFor="reg-village">Village</label>
+            <select id="reg-village" className="input" value={form.village} required onChange={(event) => update('village', event.target.value)}>
+              {villagesForCell(form.cell).map((village) => <option key={village}>{village}</option>)}
+            </select>
           </div>
-        </form>
-      </div>
+        </div>
+
+        <div className="field">
+          <label className="label" htmlFor="reg-password">Password</label>
+          <input id="reg-password" className="input" type="password" value={form.password} required onChange={(event) => update('password', event.target.value)} />
+          <small className="hint">At least 6 characters.</small>
+        </div>
+
+        <small className="hint" style={{ marginTop: 12 }}>Case study area: Kacyiru Sector, Gasabo District.</small>
+        {error && <p className="err">{error}</p>}
+
+        <button className="btn block lg" style={{ marginTop: 16 }} disabled={saving}>
+          {saving ? 'Creating account…' : 'Register'}
+        </button>
+
+        <p style={{ marginTop: 16, textAlign: 'center', fontSize: 13, fontWeight: 600 }}>
+          <Link to="/login" style={{ color: 'var(--sky-700)' }}>Already have an account? Login</Link>
+        </p>
+      </form>
     </main>
   );
 };
-
-const Field = ({ label, type = 'text', value, onChange = () => {}, required = false, readOnly = false }) => (
-  <label>
-    <span className="label">{label}{required && <span className="text-red-500"> *</span>}</span>
-    <input className="input" type={type} value={value} required={required} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
-  </label>
-);

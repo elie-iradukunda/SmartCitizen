@@ -22,6 +22,14 @@ Backend API: `http://localhost:5001/api` (see `backend/.env`, `PORT`)
 
 MySQL must be running (this project was developed against XAMPP's MySQL on `localhost:3306`, user `root`, empty password). The backend creates the configured database, synchronizes tables, and seeds SCFCMS users, complaint categories, offices, routing rules, complaints, responses, notifications, ratings, and audit logs.
 
+If local XAMPP MySQL is unstable, use Docker instead:
+
+```bash
+docker compose up -d mysql
+```
+
+Then set `DB_HOST=127.0.0.1`, `DB_PORT=3307`, `MYSQL_HOST=127.0.0.1`, and `MYSQL_PORT=3307` in `backend/.env`.
+
 ## Demo Login Accounts
 
 All demo accounts use password `password`.
@@ -48,3 +56,41 @@ All demo accounts use password `password`.
 Copy `backend/.env.example` to `backend/.env` when you want custom ports, JWT secret, MySQL credentials, or API keys. `PORT` defaults to `5001` in this environment because `5000` was already in use by another local project.
 
 The platform uses no frontend mock fallback data. If the backend or database is unavailable, the issue will appear during testing instead of being hidden by local fake data.
+
+## Testing
+
+```bash
+npm test
+```
+
+With the dev server already running:
+
+```bash
+npm run test:api
+```
+
+The API integration test logs in as citizen, staff, and admin, submits a complaint, routes it, resolves it, rates it, verifies reports/export, and checks audit logs.
+
+## Reports and Documents
+
+Admins and staff can open **Reports** and:
+
+- Print the report from the browser.
+- Download a CSV report that opens in Excel.
+- Download an HTML report document that can be saved or printed as PDF.
+
+## Optional Production Notifications
+
+The system always stores in-app notifications. Real outbound notifications are optional:
+
+- Configure `SMTP_*` variables for password reset and complaint update emails.
+- Configure `TWILIO_*` variables for SMS updates.
+- Leave those variables blank for demo mode.
+
+## Documentation
+
+- `docs/USER_MANUAL.md`
+- `docs/ROLE_PERMISSIONS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PRODUCTION_CHECKLIST.md`
+- `database/schema.sql` is the SCFCMS schema matching the current complaint system.
