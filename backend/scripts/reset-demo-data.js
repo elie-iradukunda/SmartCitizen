@@ -1,5 +1,5 @@
-// Wipes every complaint and everything hanging off one, then lets the normal seed refresh
-// users and reference data. Demo complaints are restored only when DB_SEED_COMPLAINTS=true.
+// Wipes demo tables, then rebuilds the one-example seed set. Demo complaints are restored
+// only when DB_SEED_COMPLAINTS=true.
 //
 // It never runs by accident: it prints what it found, then waits for you to type DELETE.
 //
@@ -11,7 +11,6 @@
 
 import readline from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import { Op } from 'sequelize';
 import { sequelize } from '../src/config/database.js';
 import {
   AuditLog,
@@ -26,7 +25,7 @@ import {
   SatisfactionRating,
   User
 } from '../src/models/index.js';
-import { seedDemoData, seedDemoInventory } from '../src/services/seedService.js';
+import { seedDemoData } from '../src/services/seedService.js';
 
 const force = process.argv.includes('--force');
 
@@ -37,8 +36,6 @@ const describeTarget = () => {
   return `${database} @ ${host}`;
 };
 
-const staleValues = (legacy, current) => legacy.filter((value) => !current.includes(value));
-
 const confirm = async (count) => {
   if (force) return true;
   const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -47,33 +44,36 @@ const confirm = async (count) => {
   return answer.trim() === 'DELETE';
 };
 
-const destroyIfAny = async (model, field, values, transaction) => {
-  if (!values.length) return 0;
-  return model.destroy({ where: { [field]: { [Op.in]: values } }, transaction });
-};
-
 const run = async () => {
   await sequelize.authenticate();
 
-  const staleUserEmails = staleValues(seedDemoInventory.legacyUserEmails, seedDemoInventory.currentUserEmails);
-  const staleRoutingRuleCodes = staleValues(seedDemoInventory.legacyRoutingRuleCodes, seedDemoInventory.currentRoutingRuleCodes);
-  const staleCategoryCodes = staleValues(seedDemoInventory.legacyCategoryCodes, seedDemoInventory.currentCategoryCodes);
-  const staleOfficeCodes = staleValues(seedDemoInventory.legacyOfficeCodes, seedDemoInventory.currentOfficeCodes);
-
-  const complaints = await Complaint.count();
-  const [messages, responses, ratings, notifications, logs, staleUsers, staleRules, staleCategories, staleOffices] = await Promise.all([
+  const [
+    complaints,
+    messages,
+    responses,
+    ratings,
+    notifications,
+    logs,
+    counters,
+    users,
+    rules,
+    categories,
+    offices
+  ] = await Promise.all([
+    Complaint.count(),
     ComplaintMessage.count(),
     ComplaintResponse.count(),
     SatisfactionRating.count(),
     ComplaintNotification.count(),
     AuditLog.count(),
-    staleUserEmails.length ? User.count({ where: { email: { [Op.in]: staleUserEmails } } }) : 0,
-    staleRoutingRuleCodes.length ? RoutingRule.count({ where: { code: { [Op.in]: staleRoutingRuleCodes } } }) : 0,
-    staleCategoryCodes.length ? ComplaintCategory.count({ where: { code: { [Op.in]: staleCategoryCodes } } }) : 0,
-    staleOfficeCodes.length ? Office.count({ where: { code: { [Op.in]: staleOfficeCodes } } }) : 0
+    Counter.count(),
+    User.count(),
+    RoutingRule.count(),
+    ComplaintCategory.count(),
+    Office.count()
   ]);
   const totalToReset = complaints + messages + responses + ratings + notifications + logs
-    + staleUsers + staleRules + staleCategories + staleOffices;
+    + counters + users + rules + categories + offices;
 
   console.log(`\nTarget database : ${describeTarget()}`);
   console.log('\nThis will permanently delete:');
@@ -83,19 +83,20 @@ const run = async () => {
   console.log(`  satisfaction ratings  ${ratings}`);
   console.log(`  notifications         ${notifications}`);
   console.log(`  audit log entries     ${logs}`);
-  console.log(`  old demo users        ${staleUsers}`);
-  console.log(`  old routing rules     ${staleRules}`);
-  console.log(`  old categories        ${staleCategories}`);
-  console.log(`  old offices           ${staleOffices}`);
-  console.log('\nAfterwards the seed recreates one citizen, one normal staff account, one escalation staff account, one admin, one active category, one active routing rule, and one sample complaint.');
+  console.log(`  counters              ${counters}`);
+  console.log(`  users                 ${users}`);
+  console.log(`  routing rules         ${rules}`);
+  console.log(`  categories            ${categories}`);
+  console.log(`  offices               ${offices}`);
+  console.log('\nAfterwards the seed recreates one citizen, one administrative staff account, one admin, one active office, one active category, one active routing rule, and one sample complaint.');
 
   if (totalToReset > 0 && !await confirm(totalToReset)) {
     console.log('\nCancelled. Nothing was deleted.');
     return;
   }
 
-  // Children first, then stale seed-managed reference rows. One transaction, so a failure
-  // half way leaves the data as it was.
+  // Children first, then reference rows. One transaction, so a failure half way leaves the
+  // data as it was.
   await sequelize.transaction(async (transaction) => {
     await ComplaintNotification.destroy({ where: {}, transaction });
     await ComplaintMessage.destroy({ where: {}, transaction });
@@ -107,10 +108,10 @@ const run = async () => {
     // keep jumping forward after the old cases are gone.
     await Counter.destroy({ where: {}, transaction });
 
-    await destroyIfAny(User, 'email', staleUserEmails, transaction);
-    await destroyIfAny(RoutingRule, 'code', staleRoutingRuleCodes, transaction);
-    await destroyIfAny(ComplaintCategory, 'code', staleCategoryCodes, transaction);
-    await destroyIfAny(Office, 'code', staleOfficeCodes, transaction);
+    await RoutingRule.destroy({ where: {}, transaction });
+    await User.destroy({ where: {}, transaction });
+    await ComplaintCategory.destroy({ where: {}, transaction });
+    await Office.destroy({ where: {}, transaction });
   });
 
   console.log('\nDeleted. Rebuilding the single-example seed data...');
@@ -120,19 +121,19 @@ const run = async () => {
   if (previousSeedComplaints === undefined) delete process.env.DB_SEED_COMPLAINTS;
   else process.env.DB_SEED_COMPLAINTS = previousSeedComplaints;
 
-  const [remaining, sample, users, categories, offices, rules] = await Promise.all([
+  const [remaining, sample, remainingUsers, remainingCategories, remainingOffices, remainingRules] = await Promise.all([
     Complaint.count(),
     Complaint.findOne({ order: [['id', 'ASC']] }),
-    User.count({ where: { email: { [Op.in]: seedDemoInventory.currentUserEmails } } }),
-    ComplaintCategory.count({ where: { code: { [Op.in]: seedDemoInventory.currentCategoryCodes }, active: true } }),
-    Office.count({ where: { code: { [Op.in]: seedDemoInventory.currentOfficeCodes }, active: true } }),
-    RoutingRule.count({ where: { code: { [Op.in]: seedDemoInventory.currentRoutingRuleCodes }, active: true } })
+    User.count(),
+    ComplaintCategory.count(),
+    Office.count(),
+    RoutingRule.count()
   ]);
   console.log(`\nDone. Complaints now: ${remaining}`);
-  console.log(`Demo users now: ${users}`);
-  console.log(`Active demo categories now: ${categories}`);
-  console.log(`Active demo offices now: ${offices}`);
-  console.log(`Active demo routing rules now: ${rules}`);
+  console.log(`Demo users now: ${remainingUsers}`);
+  console.log(`Active demo categories now: ${remainingCategories}`);
+  console.log(`Active demo offices now: ${remainingOffices}`);
+  console.log(`Active demo routing rules now: ${remainingRules}`);
   if (sample) console.log(`Remaining case: ${sample.trackingNumber} (${sample.status})`);
 };
 

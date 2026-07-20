@@ -20,8 +20,7 @@ const demoCitizens = [
 ];
 
 const demoStaff = [
-  { fullName: 'Patrick Niyonsenga', email: 'staff@smartcitizen.rw', phone: '+250 788 456 222', gender: 'Male', officeCode: 'citizen-services-office' },
-  { fullName: 'Claudine Mukamana', email: 'executive@smartcitizen.rw', phone: '+250 788 456 227', gender: 'Female', officeCode: 'sector-executive-office' }
+  { fullName: 'Patrick Niyonsenga', email: 'staff@smartcitizen.rw', phone: '+250 788 456 222', gender: 'Male', officeCode: 'citizen-services-office' }
 ].map((staff) => ({ ...staff, province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamatamu', village: 'Umucyo', preferredLanguage: 'English' }));
 
 const demoAdmins = [
@@ -32,11 +31,10 @@ const scfcmsCategories = [
   { code: 'citizen-services', name: 'Citizen Services and Documents', description: 'Delayed services, civil documents, certificates, permits, applications, and front-desk support.', defaultPriority: 'High', slaDays: 3 }
 ];
 
-// One normal office is enough for the demo. The Sector Executive Office stays because it is
-// the escalation target every overdue or badly-rated case needs.
+// One office is enough for the demo. It is also flagged as the escalation target so the
+// same administrative staff account can receive and answer escalated complaints.
 const offices = [
-  { code: 'citizen-services-office', name: 'Citizen Services and Documentation Office', contactPerson: 'Patrick Niyonsenga', phone: '+250 788 300 101', email: 'citizen.services@kacyiru.gov.rw' },
-  { code: 'sector-executive-office', name: 'Sector Executive Office', contactPerson: 'Claudine Mukamana', phone: '+250 788 300 111', email: 'executive@kacyiru.gov.rw', isSectorExecutive: true }
+  { code: 'citizen-services-office', name: 'Citizen Services and Documentation Office', contactPerson: 'Patrick Niyonsenga', phone: '+250 788 300 101', email: 'citizen.services@kacyiru.gov.rw', isSectorExecutive: true }
 ];
 
 const routeSeeds = [

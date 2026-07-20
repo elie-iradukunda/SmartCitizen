@@ -201,9 +201,15 @@ test('a complaint can be sent as text, as voice, as both, or as an uploaded docu
   ctx.withDoc = await complaintService.create(
     { type: ctx.infraCat.id, description: 'Dosiye' },
     ctx.citizen,
-    { attachment: { originalname: 'doc.pdf', filename: 'd1.pdf', mimetype: 'application/pdf' } }
+    {
+      attachment: {
+        originalname: 'doc.docx',
+        filename: 'd1.docx',
+        mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      }
+    }
   );
-  assert.equal(ctx.withDoc.evidenceType, 'pdf');
+  assert.equal(ctx.withDoc.evidenceType, 'document');
 });
 
 test('the category decides the department, and only that department is notified', async () => {
@@ -440,7 +446,7 @@ test('the SLA check automatically escalates overdue open complaints', async () =
 
 test('anonymous reports can be tracked without exposing a citizen identity', async () => {
   const complaint = await complaintService.create(
-    { description: 'Natanze amakuru ntashaka ko amazina yanjye agaragara.', evidenceLink: 'https://example.com/evidence' },
+    { description: 'Natanze amakuru ntashaka ko amazina yanjye agaragara.' },
     null,
     {}
   );

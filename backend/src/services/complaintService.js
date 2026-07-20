@@ -449,9 +449,12 @@ const appendMessage = async (complaint, actor, body, { notify = true } = {}) => 
 
 const evidenceTypeFromFile = (file) => {
   const mime = file?.mimetype || '';
-  if (mime.startsWith('video/')) return 'video';
   if (mime.startsWith('image/')) return 'image';
   if (mime === 'application/pdf') return 'pdf';
+  if ([
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ].includes(mime)) return 'document';
   if (mime.startsWith('audio/')) return 'audio';
   return file ? 'file' : '';
 };
@@ -884,9 +887,7 @@ export const complaintService = {
       ? 'Voice complaint recorded by citizen.'
       : attachmentFile
         ? 'Evidence submitted by citizen.'
-        : payload.evidenceLink?.trim()
-          ? 'Evidence link submitted by citizen.'
-          : '';
+        : '';
 
     const complaint = await Complaint.create({
       trackingNumber,
@@ -908,7 +909,7 @@ export const complaintService = {
       evidenceType: evidenceTypeFromFile(attachmentFile),
       attachmentName: attachmentFile?.originalname || payload.attachmentName || '',
       attachmentPath: attachmentFile ? `/uploads/${attachmentFile.filename}` : '',
-      evidenceLink: payload.evidenceLink?.trim() || '',
+      evidenceLink: '',
       voiceNoteName: voiceNoteFile?.originalname || '',
       voiceNotePath: voiceNoteFile ? `/uploads/${voiceNoteFile.filename}` : '',
       voiceNoteType: evidenceTypeFromFile(voiceNoteFile),

@@ -18,18 +18,24 @@ const extensionFromMime = (mime = '') => {
   if (mime.includes('m4a')) return '.m4a';
   if (mime.includes('wav')) return '.wav';
   if (mime.includes('pdf')) return '.pdf';
+  if (mime.includes('msword')) return '.doc';
+  if (mime.includes('wordprocessingml')) return '.docx';
   if (mime.includes('png')) return '.png';
   if (mime.includes('jpeg')) return '.jpg';
   if (mime.includes('webp')) return '.webp';
   if (mime.includes('gif')) return '.gif';
   return '';
 };
-const allowedUpload = (file) => (
-  file.mimetype.startsWith('image/')
-  || file.mimetype.startsWith('video/')
-  || file.mimetype.startsWith('audio/')
-  || file.mimetype === 'application/pdf'
-);
+const allowedDocument = (mime = '') => [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+].includes(mime);
+const allowedUpload = (file) => {
+  if (file.fieldname === 'voiceNote') return file.mimetype.startsWith('audio/');
+  if (file.fieldname === 'attachment') return file.mimetype.startsWith('image/') || allowedDocument(file.mimetype);
+  return false;
+};
 const storage = multer.diskStorage({
   destination: uploadDir,
   filename: (req, file, cb) => {
@@ -42,7 +48,7 @@ const upload = multer({
   limits: { fileSize: maxUploadMb * 1024 * 1024, files: 2 },
   fileFilter: (req, file, cb) => {
     if (allowedUpload(file)) return cb(null, true);
-    return cb(new Error('Only image, video, audio, or PDF evidence files are allowed.'));
+    return cb(new Error('Only image or document evidence files are allowed. Use the voice recorder for audio complaints.'));
   }
 });
 const complaintUploads = upload.fields([

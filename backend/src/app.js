@@ -72,7 +72,7 @@ app.use((err, req, res, next) => {
   console.error(err);
   const uniqueError = err.name === 'SequelizeUniqueConstraintError';
   const validationError = err.name === 'SequelizeValidationError';
-  const uploadError = err.name === 'MulterError' || err.message?.startsWith('Only image, video, audio, or PDF');
+  const uploadError = err.name === 'MulterError' || err.message?.startsWith('Only image or document evidence files');
   const message = uniqueError
     ? `${err.errors?.[0]?.path || 'Record'} already exists. Use a different value or update the existing record.`
     : err.message || 'Unexpected server error';

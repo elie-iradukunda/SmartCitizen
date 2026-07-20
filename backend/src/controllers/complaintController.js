@@ -18,8 +18,8 @@ export const complaintController = {
       voiceNote: req.files?.voiceNote?.[0] || null
     };
     validateRequired(req.body, ['type']);
-    if (!req.body.description?.trim() && !req.body.evidenceLink?.trim() && !files.voiceNote && !files.attachment) {
-      const error = new Error('Description, voice recording, evidence upload, or evidence link is required');
+    if (!req.body.description?.trim() && !files.voiceNote && !files.attachment) {
+      const error = new Error('Description, voice recording, or evidence upload is required');
       error.status = 422;
       throw error;
     }
@@ -33,7 +33,7 @@ export const complaintController = {
       attachment: req.files?.attachment?.[0] || null,
       voiceNote: req.files?.voiceNote?.[0] || null
     };
-    if (!req.body.description?.trim() && !req.body.evidenceLink?.trim() && !files.voiceNote && !files.attachment) {
+    if (!req.body.description?.trim() && !files.voiceNote && !files.attachment) {
       const error = new Error('Describe what happened, or attach evidence.');
       error.status = 422;
       throw error;
