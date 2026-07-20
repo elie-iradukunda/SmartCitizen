@@ -10,6 +10,7 @@ import { useToast, errorMessage } from '../../context/ToastContext.jsx';
 const demoAccounts = [
   { role: 'citizen', email: 'jean@smartcitizen.rw', label: 'Citizen', icon: '👤', tint: '#e0f2fe' },
   { role: 'staff', email: 'staff@smartcitizen.rw', label: 'Administrative Staff', icon: '🏛️', tint: '#e0f2fe' },
+  { role: 'staff', email: 'executive@smartcitizen.rw', label: 'Escalation Staff', icon: '⬆️', tint: '#dcfce7' },
   { role: 'admin', email: 'admin@smartcitizen.rw', label: 'Admin', icon: '🛡️', tint: '#ede9fe' }
 ];
 

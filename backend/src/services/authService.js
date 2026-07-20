@@ -14,6 +14,13 @@ const kacyiruDefaults = {
 const RESET_TOKEN_TTL_MINUTES = 30;
 const MIN_PASSWORD_LENGTH = 6;
 
+// The reset link and token are only handed back in the HTTP response for local demo use,
+// where there is no mail server and the link is shown on screen. In production, or as soon
+// as SMTP is configured, they travel by email only - otherwise anyone could POST a victim's
+// email to /forgot-password and read the reset token straight out of the response.
+const emailConfigured = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+const revealResetLink = () => process.env.NODE_ENV !== 'production' && !emailConfigured();
+
 // A Rwandan National ID is 16 digits. Citizens write it with spaces off their card, so the
 // spaces are stripped before it is checked or stored - otherwise the same ID stored two
 // different ways would slip past the duplicate check below.
@@ -164,12 +171,17 @@ export const authService = {
       expiresInMinutes: RESET_TOKEN_TTL_MINUTES
     }).catch((error) => console.error('[password-reset-email]', error.message));
 
-    return {
-      message,
-      resetLink,
-      token,
-      expiresInMinutes: RESET_TOKEN_TTL_MINUTES
-    };
+    return revealResetLink()
+      ? {
+        message,
+        resetLink,
+        token,
+        expiresInMinutes: RESET_TOKEN_TTL_MINUTES
+      }
+      : {
+        message,
+        expiresInMinutes: RESET_TOKEN_TTL_MINUTES
+      };
   },
 
   async resetPassword({ email, token, password }) {

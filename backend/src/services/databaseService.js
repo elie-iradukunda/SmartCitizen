@@ -39,6 +39,7 @@ const ensureSchemaColumns = async () => {
     [Complaint, 'voiceNoteType'],
     [Complaint, 'chatOpenedAt'],
     [Complaint, 'escalationRequestedAt'],
+    [Complaint, 'escalationSourceOfficeId'],
     [SatisfactionRating, 'isPublic']
   ];
 

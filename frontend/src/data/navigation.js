@@ -9,7 +9,7 @@ export const tabLinks = {
     { label: 'Profile', to: '/app/profile', icon: '@' }
   ],
   staff: [
-    { label: 'Cases', to: '/staff/cases', icon: '>' },
+    { label: 'Assigned to Me', to: '/staff/cases', icon: '>' },
     { label: 'Reports', to: '/staff/reports', icon: '%' },
     { label: 'Citizen Feedback', to: '/staff/feedback', icon: '*' },
     { label: 'Notifications', to: '/staff/notifications', icon: '!', badge: 'unread' }

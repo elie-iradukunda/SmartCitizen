@@ -66,6 +66,7 @@ const sortByCodeOrder = (items, order) => [...items].sort((a, b) => {
 const includeComplaintRelations = [
   { model: ComplaintCategory, as: 'category' },
   { model: Office, as: 'office' },
+  { model: Office, as: 'escalationSourceOffice' },
   { model: ComplaintResponse, as: 'responses', separate: true, order: [['createdAt', 'ASC']] },
   { model: ComplaintMessage, as: 'messages', separate: true, order: [['createdAt', 'ASC']] },
   { model: SatisfactionRating, as: 'satisfaction' }
@@ -82,7 +83,10 @@ const canReadChat = (item, actor) => {
   if (!actor) return false;
   if (actor.role === 'admin') return true;
   if (actor.role === 'citizen') return item.citizenId === actor.id;
-  return Boolean(actor.officeId) && item.officeId === actor.officeId;
+  return Boolean(actor.officeId) && (
+    item.officeId === actor.officeId
+    || item.escalationSourceOfficeId === actor.officeId
+  );
 };
 
 const publicComplaint = (record, actor = null) => {
@@ -119,6 +123,8 @@ const publicComplaint = (record, actor = null) => {
     assignedOffice: item.office?.name,
     assignedTo: item.assignedTo,
     escalatedTo: item.escalatedTo,
+    escalationSourceOfficeId: item.escalationSourceOfficeId,
+    escalationSourceOffice: item.escalationSourceOffice?.name,
     office: item.office,
     channel: item.channel,
     submissionMode: item.submissionMode,
@@ -349,6 +355,43 @@ const notifyOffice = async (complaint, title, message, { includeAdmins = false }
   return notifications;
 };
 
+const notifyCaseHandlers = async (complaint, title, message, { includeAdmins = false, excludeUserId = null } = {}) => {
+  const officeIds = [...new Set([
+    complaint.officeId,
+    complaint.escalationSourceOfficeId
+  ].filter(Boolean))];
+  const recipients = await User.findAll({
+    where: {
+      status: 'active',
+      [Op.or]: [
+        ...(officeIds.length ? [{ role: 'staff', officeId: { [Op.in]: officeIds } }] : []),
+        ...(includeAdmins ? [{ role: 'admin' }] : [])
+      ]
+    }
+  });
+  const selected = recipients.filter((user) => user.id !== excludeUserId);
+  if (!selected.length) return [];
+
+  const notifications = await ComplaintNotification.bulkCreate(
+    selected.map((user) => ({
+      userId: user.id,
+      complaintId: complaint.id,
+      title,
+      message
+    }))
+  );
+
+  await Promise.all(selected.map((user) => notificationService.sendComplaintUpdate({
+    user,
+    phone: user.phone,
+    trackingNumber: complaint.trackingNumber,
+    title,
+    message
+  }).catch((error) => console.error('[case-handler-notification]', error.message))));
+
+  return notifications;
+};
+
 // Every chat message goes through here so the "first office reply opens the chat" rule is
 // enforced in one place, whether the reply came from the chat box or from the status form.
 const appendMessage = async (complaint, actor, body, { notify = true } = {}) => {
@@ -376,6 +419,21 @@ const appendMessage = async (complaint, actor, body, { notify = true } = {}) => 
         complaint,
         'New message on your complaint',
         `${actor.fullName} replied to ${complaint.trackingNumber}.`
+      );
+      if (complaint.status === 'Escalated' || actor.role === 'admin') {
+        await notifyCaseHandlers(
+          complaint,
+          'Feedback chat updated',
+          `${actor.fullName} wrote on ${complaint.trackingNumber}.`,
+          { includeAdmins: true, excludeUserId: actor.id }
+        );
+      }
+    } else if (complaint.status === 'Escalated') {
+      await notifyCaseHandlers(
+        complaint,
+        'New message from citizen',
+        `${actor.fullName} sent a message on ${complaint.trackingNumber}.`,
+        { includeAdmins: true, excludeUserId: actor.id }
       );
     } else {
       await notifyOffice(
@@ -449,14 +507,34 @@ const assertStaffCanWork = (complaint, actor) => {
   throw error;
 };
 
-// A citizen sees only their own notifications, a staff member only those raised on
-// cases held by their office, and an admin sees the whole system feed.
-const notificationScope = (actor) => (actor?.role === 'citizen' ? { userId: actor.id } : {});
+const assertCanSendMessage = (complaint, actor) => {
+  if (actor?.role !== 'staff') return;
+  if (actor.officeId && (
+    complaint.officeId === actor.officeId
+    || complaint.escalationSourceOfficeId === actor.officeId
+  )) return;
+  const error = new Error('Only the admin and the departments involved in this case can reply in the feedback chat.');
+  error.status = 403;
+  throw error;
+};
+
+// Citizens and staff see their own delivered notifications. Admin keeps the wider system
+// feed for oversight.
+const notificationScope = (actor) => (actor?.role === 'admin' ? {} : { userId: actor.id });
 
 const notificationComplaintInclude = (actor) => {
   const include = { model: Complaint, as: 'complaint' };
   if (actor?.role !== 'staff') return include;
-  return { ...include, required: true, where: { officeId: actor.officeId ?? -1 } };
+  return {
+    ...include,
+    required: true,
+    where: {
+      [Op.or]: [
+        { officeId: actor.officeId ?? -1 },
+        { escalationSourceOfficeId: actor.officeId ?? -1 }
+      ]
+    }
+  };
 };
 
 const statusCounts = (rows) => {
@@ -467,6 +545,13 @@ const statusCounts = (rows) => {
     return acc;
   }, {}));
 };
+
+const staffComplaintScope = (officeId) => ({
+  [Op.or]: [
+    { officeId },
+    { escalationSourceOfficeId: officeId }
+  ]
+});
 
 export const complaintService = {
   async meta() {
@@ -722,7 +807,7 @@ export const complaintService = {
     if (filters.categoryId) where.categoryId = Number(filters.categoryId);
     if (filters.priority && filters.priority !== 'all') where.priority = filters.priority;
     if (actor?.role === 'staff' && filters.scope !== 'all' && actor.officeId) {
-      where.officeId = actor.officeId;
+      Object.assign(where, staffComplaintScope(actor.officeId));
     } else if (actor?.role === 'staff' && filters.scope !== 'all' && !actor.officeId) {
       return [];
     } else if (filters.officeId) {
@@ -934,9 +1019,9 @@ export const complaintService = {
     const complaint = await loadComplaint(trackingNumber);
     assertVisibleToActor(complaint, actor);
     assertCanReadChat(complaint, actor);
-    // Staff outside the assigned department may read a case, but answering it is exactly
-    // what department ownership means, so the same guard as the status form applies here.
-    assertStaffCanWork(complaint, actor);
+    // After escalation, the staff account in the escalation office owns the decision, but
+    // the department that first handled the case can still answer questions in the chat.
+    assertCanSendMessage(complaint, actor);
 
     const body = String(payload.body || payload.message || '').trim();
     if (!body) {
@@ -973,11 +1058,13 @@ export const complaintService = {
     const actorName = actor?.fullName || 'Administrative Staff';
     const sector = await sectorExecutiveOffice();
     const escalatedTo = sector?.name || payload.escalatedTo || 'Sector Executive Office';
+    const sourceOfficeId = complaint.escalationSourceOfficeId || complaint.officeId;
 
     await complaint.update({
       status: 'Escalated',
       priority: payload.priority || 'Critical',
       escalatedTo,
+      escalationSourceOfficeId: sourceOfficeId,
       ...(sector ? { officeId: sector.id, assignedTo: sector.contactPerson } : {})
     });
     await createResponse(
@@ -1020,12 +1107,14 @@ export const complaintService = {
     const sector = await sectorExecutiveOffice();
     const escalatedTo = sector?.name || 'Sector Executive Office';
     const reason = String(payload.reason || '').trim();
+    const sourceOfficeId = complaint.escalationSourceOfficeId || complaint.officeId;
 
     await complaint.update({
       status: 'Escalated',
       priority: 'Critical',
       escalatedTo,
       escalationRequestedAt: new Date(),
+      escalationSourceOfficeId: sourceOfficeId,
       closedAt: null,
       ...(sector ? { officeId: sector.id, assignedTo: sector.contactPerson } : {})
     });
@@ -1083,10 +1172,12 @@ export const complaintService = {
     if (score <= 2) {
       const sector = await sectorExecutiveOffice();
       const escalatedTo = sector?.name || 'Sector Executive Office';
+      const sourceOfficeId = complaint.escalationSourceOfficeId || complaint.officeId;
       await complaint.update({
         status: 'Escalated',
         priority: 'Critical',
         escalatedTo,
+        escalationSourceOfficeId: sourceOfficeId,
         closedAt: null,
         resolvedAt: complaint.resolvedAt || new Date(),
         ...(sector ? { officeId: sector.id, assignedTo: sector.contactPerson } : {})
@@ -1253,10 +1344,12 @@ export const complaintService = {
     const escalatedTo = sector?.name || 'Sector Executive Office';
 
     for (const complaint of overdue) {
+      const sourceOfficeId = complaint.escalationSourceOfficeId || complaint.officeId;
       await complaint.update({
         status: 'Escalated',
         priority: 'Critical',
         escalatedTo,
+        escalationSourceOfficeId: sourceOfficeId,
         ...(sector ? { officeId: sector.id, assignedTo: sector.contactPerson } : {})
       });
       await createResponse(
@@ -1319,7 +1412,7 @@ export const complaintService = {
           auditLogs: []
         };
       }
-      complaintWhere.officeId = actor.officeId;
+      Object.assign(complaintWhere, staffComplaintScope(actor.officeId));
     }
 
     const complaints = await Complaint.findAll({

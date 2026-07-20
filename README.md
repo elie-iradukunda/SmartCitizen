@@ -38,6 +38,7 @@ All demo accounts use password `password`.
 | --- | --- |
 | Citizen | `jean@smartcitizen.rw` |
 | Administrative Staff | `staff@smartcitizen.rw` |
+| Escalation Staff | `executive@smartcitizen.rw` |
 | Admin | `admin@smartcitizen.rw` |
 
 ## Important URLs

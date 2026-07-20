@@ -33,6 +33,9 @@ Complaint.belongsTo(ComplaintCategory, { foreignKey: 'categoryId', as: 'category
 Office.hasMany(Complaint, { foreignKey: 'officeId', as: 'complaints' });
 Complaint.belongsTo(Office, { foreignKey: 'officeId', as: 'office' });
 
+Office.hasMany(Complaint, { foreignKey: 'escalationSourceOfficeId', as: 'escalatedFromComplaints' });
+Complaint.belongsTo(Office, { foreignKey: 'escalationSourceOfficeId', as: 'escalationSourceOffice' });
+
 Office.hasMany(User, { foreignKey: 'officeId', as: 'staff' });
 User.belongsTo(Office, { foreignKey: 'officeId', as: 'office' });
 

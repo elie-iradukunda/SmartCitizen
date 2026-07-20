@@ -21,6 +21,12 @@ export const requireAuth = (req, res, next) => {
         if (!user) {
           return res.status(401).json({ message: 'User not found' });
         }
+        // A token stays valid for 7 days, so checking status only at login would let a
+        // suspended account keep working until its token expired. Re-checking here makes the
+        // admin's Suspend button take effect on the very next request.
+        if (user.status !== 'active') {
+          return res.status(401).json({ message: 'This account is suspended or pending. Ask the admin to activate it.' });
+        }
         req.user = user;
         return next();
       })

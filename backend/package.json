@@ -8,7 +8,8 @@
     "dev": "node ./node_modules/nodemon/bin/nodemon.js src/server.js",
     "start": "node src/server.js",
     "test": "node --test tests/*.test.mjs",
-    "reset-demo-data": "node scripts/reset-demo-data.js"
+    "reset-demo-data": "node scripts/reset-demo-data.js",
+    "clear:complaints": "node scripts/clear-complaint-data.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

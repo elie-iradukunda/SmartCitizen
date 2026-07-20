@@ -18,7 +18,7 @@ export const DashboardLayout = ({ role = 'citizen' }) => {
   useEffect(() => {
     if (!user || user.role !== role) return undefined;
     refreshUnread();
-    const interval = setInterval(refreshUnread, 30000);
+    const interval = setInterval(refreshUnread, 10000);
     return () => clearInterval(interval);
   }, [user, role, refreshUnread]);
 

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom';
 import { Mic, Square, Trash2 } from 'lucide-react';
 import { API_ORIGIN, endpoints } from '../../api/client.js';
 import { LoadingState } from '../../components/LoadingState.jsx';
@@ -112,42 +112,40 @@ const ComplaintChat = ({ complaint, onChange, readOnly = false }) => {
 
   const isCitizen = user?.role === 'citizen';
   const closed = complaint.status === 'Closed';
+  const conversationStarted = complaint.chatOpen || messages.length > 0;
+  const canFetchThread = !complaint.chatRedacted && (conversationStarted || (!isCitizen && !readOnly));
+
+  const loadThread = useCallback(() => {
+    if (!canFetchThread) return Promise.resolve(null);
+    return endpoints.complaintMessages(complaint.trackingNumber)
+      .then((fresh) => {
+        setMessages(fresh.messages || []);
+        return fresh;
+      });
+  }, [canFetchThread, complaint.trackingNumber]);
 
   // Opening the thread is what marks it read, so the badge clears for whoever is looking.
   useEffect(() => {
-    if (!complaint.chatOpen || complaint.chatRedacted) return;
+    setMessages(complaint.messages || []);
+  }, [complaint.trackingNumber, complaint.messageCount, complaint.messages]);
+
+  useEffect(() => {
+    if (!canFetchThread) return undefined;
     let active = true;
-    endpoints.complaintMessages(complaint.trackingNumber)
-      .then((fresh) => { if (active) setMessages(fresh.messages || []); })
+    const refresh = () => loadThread()
+      .then((fresh) => { if (active && fresh) setMessages(fresh.messages || []); })
       .catch(() => { /* the copy we were handed still renders */ });
-    return () => { active = false; };
-  }, [complaint.trackingNumber, complaint.messageCount]);
+    refresh();
+    const interval = setInterval(refresh, 7000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [canFetchThread, loadThread]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' });
   }, [messages.length]);
-
-  if (complaint.chatRedacted) {
-    return (
-      <div className="chat-shell">
-        <p className="chat-locked">
-          This conversation is private to the citizen and the department handling the case.
-        </p>
-      </div>
-    );
-  }
-
-  if (!complaint.chatOpen) {
-    return (
-      <div className="chat-shell">
-        <p className="chat-locked">
-          {isCitizen
-            ? 'The conversation opens as soon as the assigned office replies to your complaint.'
-            : 'Reply to this complaint to open the conversation with the citizen.'}
-        </p>
-      </div>
-    );
-  }
 
   const send = async (event) => {
     event.preventDefault();
@@ -166,11 +164,37 @@ const ComplaintChat = ({ complaint, onChange, readOnly = false }) => {
     }
   };
 
+  if (complaint.chatRedacted) {
+    return (
+      <div className="chat-shell">
+        <p className="chat-locked">
+          This conversation is private to the citizen and the department handling the case.
+        </p>
+      </div>
+    );
+  }
+
+  if (!conversationStarted && (isCitizen || readOnly)) {
+    return (
+      <div className="chat-shell">
+        <p className="chat-locked">
+          {isCitizen
+            ? 'The conversation opens as soon as the assigned office replies to your complaint.'
+            : 'Only the department handling this case can reply.'}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-shell">
       <div className="chat-log">
         {messages.length === 0
-          ? <p className="chat-locked">No messages yet.</p>
+          ? (
+            <p className="chat-locked">
+              {conversationStarted ? 'No messages yet.' : 'No feedback yet. Send the first reply to open the conversation.'}
+            </p>
+          )
           : messages.map((message) => (
             <div key={message.id} className={`chat-msg ${message.mine ? 'mine' : 'theirs'}`}>
               <div className="chat-bubble">
@@ -195,7 +219,7 @@ const ComplaintChat = ({ complaint, onChange, readOnly = false }) => {
                 className="input"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder="Write a message…"
+                placeholder={isCitizen ? 'Reply to the office…' : 'Write feedback to the citizen…'}
                 maxLength={2000}
                 disabled={sending}
               />
@@ -538,8 +562,12 @@ export const SubmitComplaint = () => {
 export const MyComplaints = () => {
   const [complaints, setComplaints] = useState(null);
 
-  const load = () => endpoints.myComplaints().then(setComplaints).catch(() => setComplaints([]));
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => endpoints.myComplaints().then(setComplaints).catch(() => setComplaints([])), []);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   if (!complaints) return <LoadingState />;
 
@@ -751,12 +779,27 @@ export const ComplaintDetails = () => {
   const [complaint, setComplaint] = useState(null);
   const [missing, setMissing] = useState(false);
 
-  const load = () => endpoints.complaint(trackingNumber).then(setComplaint).catch(() => setMissing(true));
-  useEffect(() => { load(); }, [trackingNumber]);
+  const load = useCallback(() => endpoints.complaint(trackingNumber)
+    .then((data) => {
+      setComplaint(data);
+      setMissing(false);
+    })
+    .catch(() => setMissing(true)), [trackingNumber]);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   if (missing) return <Empty title="Complaint not found" subtitle="It may have been removed, or it does not belong to your office." />;
   if (!complaint) return <LoadingState />;
-  const staffReadOnly = user?.role === 'admin' || (user?.role === 'staff' && complaint.assignedOfficeId !== user.officeId);
+  const ownsCurrentOffice = user?.role === 'staff' && complaint.assignedOfficeId === user.officeId;
+  const isEscalationSource = user?.role === 'staff'
+    && complaint.status === 'Escalated'
+    && complaint.escalationSourceOfficeId === user.officeId;
+  const canAdminHandleEscalation = user?.role === 'admin' && complaint.status === 'Escalated';
+  const staffReadOnly = user?.role === 'admin' ? !canAdminHandleEscalation : !ownsCurrentOffice;
+  const chatReadOnly = user?.role === 'admin' ? !canAdminHandleEscalation : !(ownsCurrentOffice || isEscalationSource);
 
   return (
     <div style={{ marginTop: 22, maxWidth: 680 }}>
@@ -764,7 +807,7 @@ export const ComplaintDetails = () => {
       <div style={{ marginTop: 18 }}>
         {user?.role === 'citizen'
           ? <CitizenCase complaint={complaint} onChange={load} alwaysOpen />
-          : <StaffCase complaint={complaint} onChange={load} alwaysOpen readOnly={staffReadOnly} />}
+          : <StaffCase complaint={complaint} onChange={load} alwaysOpen readOnly={staffReadOnly} chatReadOnly={chatReadOnly} />}
       </div>
     </div>
   );
@@ -778,11 +821,13 @@ export const AssignedCases = () => {
   const [offices, setOffices] = useState(null);
   const [filter, setFilter] = useState('open');
 
-  const load = () => endpoints.complaints({ scope: 'all' }).then(setComplaints).catch(() => setComplaints([]));
+  const load = useCallback(() => endpoints.complaints().then(setComplaints).catch(() => setComplaints([])), []);
   useEffect(() => {
     load();
     endpoints.complaintMeta().then((meta) => setOffices(meta.offices)).catch(() => setOffices([]));
-  }, []);
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, [load]);
 
   // Both must land before the header renders, or the office name flashes as "not assigned".
   if (!complaints || !offices) return <LoadingState />;
@@ -806,8 +851,10 @@ export const AssignedCases = () => {
   return (
     <div style={{ marginTop: 22 }}>
       <PageTitle
-        title={officeName || 'No office assigned yet'}
-        subtitle="You can review every submitted complaint. Only cases assigned to your office can be updated or resolved."
+        title="Assigned to me"
+        subtitle={officeName
+          ? `Cases routed to ${officeName}. You can reply to the citizen and continue the conversation here.`
+          : 'No office is linked to your staff account yet.'}
       />
 
       <div className="toolbar">
@@ -828,22 +875,28 @@ export const AssignedCases = () => {
         ? <Empty title="No cases here" subtitle="New complaints routed to your office arrive here automatically." />
         : (
           <div className="grid g2">
-            {visible.map((complaint) => (
-              <StaffCase
-                key={complaint.id}
-                complaint={complaint}
-                onChange={load}
-                readOnly={complaint.assignedOfficeId !== user?.officeId}
-                detailPath={`/staff/cases/${complaint.trackingNumber}`}
-              />
-            ))}
+            {visible.map((complaint) => {
+              const ownsCurrentOffice = complaint.assignedOfficeId === user?.officeId;
+              const isEscalationSource = complaint.status === 'Escalated'
+                && complaint.escalationSourceOfficeId === user?.officeId;
+              return (
+                <StaffCase
+                  key={complaint.id}
+                  complaint={complaint}
+                  onChange={load}
+                  readOnly={!ownsCurrentOffice}
+                  chatReadOnly={!(ownsCurrentOffice || isEscalationSource)}
+                  detailPath={`/staff/cases/${complaint.trackingNumber}`}
+                />
+              );
+            })}
           </div>
         )}
     </div>
   );
 };
 
-const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, detailPath }) => {
+const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, chatReadOnly = readOnly, detailPath }) => {
   const toast = useToast();
   const [open, setOpen] = useState(alwaysOpen);
   const [response, setResponse] = useState('');
@@ -895,6 +948,7 @@ const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, 
       <div className="meta">
         <span><b>Category:</b> {complaint.category}</span>
         <span><b>Office:</b> {complaint.assignedOffice}</span>
+        {complaint.escalationSourceOffice && <span><b>Escalated from:</b> {complaint.escalationSourceOffice}</span>}
         <span><b>Priority:</b> {complaint.priority}</span>
         <span><b>Due date:</b> {formatDate(complaint.dueDate)}</span>
       </div>
@@ -917,7 +971,9 @@ const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, 
       </div>
       {readOnly && (
         <div className="case-note">
-          View-only for your account. This case is assigned to {complaint.assignedOffice || 'another office'}.
+          {chatReadOnly
+            ? `View-only for your account. This case is assigned to ${complaint.assignedOffice || 'another office'}.`
+            : 'This case is escalated to the Sector Executive Office. Your department can still reply in the feedback chat, but the escalation office controls the final response.'}
         </div>
       )}
       <p className="body-txt">{complaint.description}</p>
@@ -946,8 +1002,15 @@ const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, 
                 {complaint.status === 'Assigned' && (
                   <button type="button" className="btn sm" disabled={saving} onClick={() => setStatus('In Review')}>Start reviewing</button>
                 )}
-                <button type="button" className="btn ghost sm" disabled={saving} onClick={() => setStatus('Waiting for Citizen')}>Ask the citizen for more</button>
-                <button type="button" className="btn red sm" disabled={saving} onClick={escalate}>Escalate</button>
+                {complaint.status === 'Escalated' && (
+                  <button type="button" className="btn sm" disabled={saving} onClick={() => setStatus('In Review')}>Take senior review</button>
+                )}
+                {complaint.status !== 'Escalated' && (
+                  <button type="button" className="btn ghost sm" disabled={saving} onClick={() => setStatus('Waiting for Citizen')}>Ask the citizen for more</button>
+                )}
+                {complaint.status !== 'Escalated' && (
+                  <button type="button" className="btn red sm" disabled={saving} onClick={escalate}>Escalate</button>
+                )}
               </div>
               <div style={{ marginTop: 12 }}>
                 <label className="label" htmlFor={`response-${complaint.id}`}>Official answer (the citizen is notified)</label>
@@ -960,18 +1023,18 @@ const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, 
                   placeholder="Write the answer from your office…"
                 />
                 <button type="button" className="btn green sm" style={{ marginTop: 8 }} disabled={saving || !response.trim()} onClick={resolve}>
-                  Mark as resolved
+                  Send resolution to citizen
                 </button>
                 <small className="hint">
-                  Your first answer opens a private conversation with the citizen. Only the citizen can close the case, by confirming it is solved.
+                  This marks the case as Resolved, not Closed. Your first answer opens the private chat, and only the citizen closes the case by rating it.
                 </small>
               </div>
             </>
           )}
 
           <div style={{ marginTop: 14 }}>
-            <label className="label">Conversation with the citizen</label>
-            <ComplaintChat complaint={complaint} onChange={onChange} readOnly={readOnly} />
+            <label className="label">Feedback chat</label>
+            <ComplaintChat complaint={complaint} onChange={onChange} readOnly={chatReadOnly} />
           </div>
 
           <Timeline items={timelineOf(complaint)} />
@@ -985,15 +1048,33 @@ const StaffCase = ({ complaint, onChange, alwaysOpen = false, readOnly = false, 
 
 export const ComplaintNotifications = () => {
   const { refreshUnread } = useOutletContext() || {};
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState(null);
 
-  useEffect(() => { endpoints.complaintNotifications().then(setNotifications).catch(() => setNotifications([])); }, []);
+  const load = useCallback(() => endpoints.complaintNotifications().then(setNotifications).catch(() => setNotifications([])), []);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, [load]);
 
-  const markRead = async (notification) => {
-    if (notification.read) return;
-    await endpoints.readNotification(notification.dbId).catch(() => {});
-    setNotifications((items) => items.map((item) => (item.id === notification.id ? { ...item, read: true } : item)));
+  const casePath = (trackingNumber) => {
+    if (!trackingNumber) return null;
+    const encoded = encodeURIComponent(trackingNumber);
+    if (user?.role === 'citizen') return `/app/complaints/${encoded}`;
+    if (user?.role === 'staff') return `/staff/cases/${encoded}`;
+    return `/admin/complaints/${encoded}`;
+  };
+
+  const openNotification = async (notification) => {
+    if (!notification.read) {
+      await endpoints.readNotification(notification.dbId).catch(() => {});
+      setNotifications((items) => items.map((item) => (item.id === notification.id ? { ...item, read: true } : item)));
+    }
     refreshUnread?.();
+    const path = casePath(notification.trackingNumber);
+    if (path) navigate(path);
   };
 
   if (!notifications) return <LoadingState />;
@@ -1010,7 +1091,7 @@ export const ComplaintNotifications = () => {
                 key={notification.id}
                 type="button"
                 className={`notif ${notification.read ? '' : 'unread'}`}
-                onClick={() => markRead(notification)}
+                onClick={() => openNotification(notification)}
               >
                 <span className="notif-ico" aria-hidden="true">{notification.read ? '📄' : '🔔'}</span>
                 <span>

@@ -16,54 +16,83 @@ import { hashPassword } from './authService.js';
 const DEMO_PASSWORD = 'password';
 
 const demoCitizens = [
-  { fullName: 'Jean Uwimana', email: 'jean@smartcitizen.rw', phone: '+250 788 456 111', nationalId: '1199080012345678', gender: 'Female', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamatamu', village: 'Umucyo', address: 'Kamatamu / Umucyo', preferredLanguage: 'Kinyarwanda' },
-  { fullName: 'Aline Umutoni', email: 'aline@smartcitizen.rw', phone: '+250 788 456 112', nationalId: '1199180012345678', gender: 'Female', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamatamu', village: 'Kamuhire', address: 'Kamatamu / Kamuhire', preferredLanguage: 'Kinyarwanda' },
-  { fullName: 'Eric Habimana', email: 'eric.h@smartcitizen.rw', phone: '+250 788 456 113', nationalId: '1198880012345678', gender: 'Male', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamutwa', village: 'Rugando', address: 'Kamutwa / Rugando', preferredLanguage: 'English' },
-  { fullName: 'Diane Ingabire', email: 'diane@smartcitizen.rw', phone: '+250 788 456 114', nationalId: '1199280012345678', gender: 'Female', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kibaza', village: 'Virunga', address: 'Kibaza / Virunga', preferredLanguage: 'Kinyarwanda' },
-  { fullName: 'Emmanuel Nkurunziza', email: 'emmanuel@smartcitizen.rw', phone: '+250 788 456 115', nationalId: '1198780012345678', gender: 'Male', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamutwa', village: 'Kacyiru', address: 'Kamutwa / Kacyiru', preferredLanguage: 'English' },
-  { fullName: 'Grace Mukamana', email: 'grace@smartcitizen.rw', phone: '+250 788 456 116', nationalId: '1199380012345678', gender: 'Female', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kibaza', village: 'Kibaza', address: 'Kibaza / Kibaza', preferredLanguage: 'Kinyarwanda' }
+  { fullName: 'Jean Uwimana', email: 'jean@smartcitizen.rw', phone: '+250 788 456 111', nationalId: '1199080012345678', gender: 'Female', province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamatamu', village: 'Umucyo', address: 'Kamatamu / Umucyo', preferredLanguage: 'Kinyarwanda' }
 ];
 
 const demoStaff = [
   { fullName: 'Patrick Niyonsenga', email: 'staff@smartcitizen.rw', phone: '+250 788 456 222', gender: 'Male', officeCode: 'citizen-services-office' },
-  { fullName: 'Eric Ndayisenga', email: 'eric.n@smartcitizen.rw', phone: '+250 788 456 224', gender: 'Male', officeCode: 'infrastructure-sanitation-office' },
-  { fullName: 'Samuel Rukundo', email: 'samuel@smartcitizen.rw', phone: '+250 788 456 229', gender: 'Male', officeCode: 'land-housing-construction-office' },
-  { fullName: 'Vincent Mugisha', email: 'vincent@smartcitizen.rw', phone: '+250 788 456 225', gender: 'Male', officeCode: 'community-safety-health-office' },
-  { fullName: 'Solange Umuhoza', email: 'solange@smartcitizen.rw', phone: '+250 788 456 226', gender: 'Female', officeCode: 'governance-accountability-office' },
   { fullName: 'Claudine Mukamana', email: 'executive@smartcitizen.rw', phone: '+250 788 456 227', gender: 'Female', officeCode: 'sector-executive-office' }
 ].map((staff) => ({ ...staff, province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamatamu', village: 'Umucyo', preferredLanguage: 'English' }));
 
 const demoAdmins = [
-  { fullName: 'Admin Manager', email: 'admin@smartcitizen.rw', phone: '+250 788 456 444', gender: 'Other' },
-  { fullName: 'Alice Admin', email: 'alice.admin@smartcitizen.rw', phone: '+250 788 456 445', gender: 'Female' }
+  { fullName: 'Admin Manager', email: 'admin@smartcitizen.rw', phone: '+250 788 456 444', gender: 'Other' }
 ].map((admin) => ({ ...admin, province: 'Kigali City', district: 'Gasabo', sector: 'Kacyiru', cell: 'Kamatamu', village: 'Umucyo', preferredLanguage: 'English' }));
 
 const scfcmsCategories = [
-  { code: 'citizen-services', name: 'Citizen Services and Documents', description: 'Delayed services, civil documents, certificates, permits, applications, and front-desk support.', defaultPriority: 'High', slaDays: 3 },
-  { code: 'infrastructure-sanitation', name: 'Infrastructure, Water and Sanitation', description: 'Roads, drainage, street lights, public water, waste collection, sanitation, and environmental concerns.', defaultPriority: 'High', slaDays: 4 },
-  { code: 'land-housing-construction', name: 'Land, Housing and Construction', description: 'Land records, plots, construction permits, housing disputes, and property-related concerns.', defaultPriority: 'High', slaDays: 5 },
-  { code: 'community-safety-health', name: 'Community Safety, Health and Social Welfare', description: 'Security, community safety, public health, hygiene, youth, education, and social support concerns.', defaultPriority: 'High', slaDays: 3 },
-  { code: 'governance-accountability', name: 'Governance, Misconduct and Feedback', description: 'Misconduct, corruption, unfair treatment, appeals, appreciation, suggestions, and general feedback.', defaultPriority: 'Critical', slaDays: 2 }
+  { code: 'citizen-services', name: 'Citizen Services and Documents', description: 'Delayed services, civil documents, certificates, permits, applications, and front-desk support.', defaultPriority: 'High', slaDays: 3 }
 ];
 
-// The last office is the escalation target: every overdue or badly-rated case lands there,
-// which is what stops an ignored complaint from sitting in one office forever.
+// One normal office is enough for the demo. The Sector Executive Office stays because it is
+// the escalation target every overdue or badly-rated case needs.
 const offices = [
   { code: 'citizen-services-office', name: 'Citizen Services and Documentation Office', contactPerson: 'Patrick Niyonsenga', phone: '+250 788 300 101', email: 'citizen.services@kacyiru.gov.rw' },
-  { code: 'infrastructure-sanitation-office', name: 'Infrastructure, Water and Sanitation Office', contactPerson: 'Eric Ndayisenga', phone: '+250 788 300 103', email: 'infrastructure.sanitation@kacyiru.gov.rw' },
-  { code: 'land-housing-construction-office', name: 'Land, Housing and Construction Office', contactPerson: 'Samuel Rukundo', phone: '+250 788 300 107', email: 'land.construction@kacyiru.gov.rw' },
-  { code: 'community-safety-health-office', name: 'Community Safety, Health and Social Welfare Office', contactPerson: 'Vincent Mugisha', phone: '+250 788 300 104', email: 'community.safety@kacyiru.gov.rw' },
-  { code: 'governance-accountability-office', name: 'Governance and Accountability Office', contactPerson: 'Solange Umuhoza', phone: '+250 788 300 100', email: 'accountability@kacyiru.gov.rw' },
   { code: 'sector-executive-office', name: 'Sector Executive Office', contactPerson: 'Claudine Mukamana', phone: '+250 788 300 111', email: 'executive@kacyiru.gov.rw', isSectorExecutive: true }
 ];
 
 const routeSeeds = [
-  { code: 'route-citizen-services', categoryCode: 'citizen-services', officeCode: 'citizen-services-office', location: 'Kacyiru', priority: 'High', slaDays: 3 },
-  { code: 'route-infrastructure-sanitation', categoryCode: 'infrastructure-sanitation', officeCode: 'infrastructure-sanitation-office', location: 'Kacyiru', priority: 'High', slaDays: 4 },
-  { code: 'route-land-housing-construction', categoryCode: 'land-housing-construction', officeCode: 'land-housing-construction-office', location: 'Kacyiru', priority: 'High', slaDays: 5 },
-  { code: 'route-community-safety-health', categoryCode: 'community-safety-health', officeCode: 'community-safety-health-office', location: 'Kacyiru', priority: 'High', slaDays: 3 },
-  { code: 'route-governance-accountability', categoryCode: 'governance-accountability', officeCode: 'governance-accountability-office', location: 'Kacyiru', priority: 'Critical', slaDays: 2 }
+  { code: 'route-citizen-services', categoryCode: 'citizen-services', officeCode: 'citizen-services-office', location: 'Kacyiru', priority: 'High', slaDays: 3 }
 ];
+
+export const seedDemoInventory = {
+  currentUserEmails: [
+    ...demoCitizens.map((user) => user.email),
+    ...demoStaff.map((user) => user.email),
+    ...demoAdmins.map((user) => user.email)
+  ],
+  legacyUserEmails: [
+    'jean@smartcitizen.rw',
+    'aline@smartcitizen.rw',
+    'eric.h@smartcitizen.rw',
+    'diane@smartcitizen.rw',
+    'emmanuel@smartcitizen.rw',
+    'grace@smartcitizen.rw',
+    'staff@smartcitizen.rw',
+    'eric.n@smartcitizen.rw',
+    'samuel@smartcitizen.rw',
+    'vincent@smartcitizen.rw',
+    'solange@smartcitizen.rw',
+    'executive@smartcitizen.rw',
+    'admin@smartcitizen.rw',
+    'alice.admin@smartcitizen.rw'
+  ],
+  currentCategoryCodes: scfcmsCategories.map((category) => category.code),
+  legacyCategoryCodes: [
+    'citizen-services',
+    'infrastructure-sanitation',
+    'land-housing-construction',
+    'community-safety-health',
+    'governance-accountability'
+  ],
+  currentOfficeCodes: offices.map((office) => office.code),
+  legacyOfficeCodes: [
+    'citizen-services-office',
+    'infrastructure-sanitation-office',
+    'land-housing-construction-office',
+    'community-safety-health-office',
+    'governance-accountability-office',
+    'sector-executive-office'
+  ],
+  currentRoutingRuleCodes: routeSeeds.map((route) => route.code),
+  legacyRoutingRuleCodes: [
+    'route-citizen-services',
+    'route-infrastructure-sanitation',
+    'route-land-housing-construction',
+    'route-community-safety-health',
+    'route-governance-accountability'
+  ]
+};
+
+const staleSeedValues = (legacy, current) => legacy.filter((value) => !current.includes(value));
 
 const findOrCreateBy = async (model, where, defaults) => {
   const [record, created] = await model.findOrCreate({ where, defaults });
@@ -119,9 +148,9 @@ const seedStaffUsers = async (officeByCode) => {
 const seedComplaintReferenceData = async () => {
   const categoryByCode = {};
   const officeByCode = {};
-  const activeCategoryCodes = scfcmsCategories.map((category) => category.code);
-  const activeOfficeCodes = offices.map((office) => office.code);
-  const activeRouteCodes = routeSeeds.map((route) => route.code);
+  const staleCategoryCodes = staleSeedValues(seedDemoInventory.legacyCategoryCodes, seedDemoInventory.currentCategoryCodes);
+  const staleOfficeCodes = staleSeedValues(seedDemoInventory.legacyOfficeCodes, seedDemoInventory.currentOfficeCodes);
+  const staleRouteCodes = staleSeedValues(seedDemoInventory.legacyRoutingRuleCodes, seedDemoInventory.currentRoutingRuleCodes);
 
   for (const category of scfcmsCategories) {
     categoryByCode[category.code] = await findOrCreateBy(ComplaintCategory, { code: category.code }, { ...category, active: true });
@@ -143,16 +172,21 @@ const seedComplaintReferenceData = async () => {
     });
   }
 
-  await ComplaintCategory.update({ active: false }, { where: { code: { [Op.notIn]: activeCategoryCodes } } });
-  await Office.update({ active: false }, { where: { code: { [Op.notIn]: activeOfficeCodes } } });
-  await RoutingRule.update({ active: false }, { where: { code: { [Op.notIn]: activeRouteCodes } } });
+  if (staleCategoryCodes.length) {
+    await ComplaintCategory.update({ active: false }, { where: { code: { [Op.in]: staleCategoryCodes } } });
+  }
+  if (staleOfficeCodes.length) {
+    await Office.update({ active: false }, { where: { code: { [Op.in]: staleOfficeCodes } } });
+  }
+  if (staleRouteCodes.length) {
+    await RoutingRule.update({ active: false }, { where: { code: { [Op.in]: staleRouteCodes } } });
+  }
 
   return { categoryByCode, officeByCode };
 };
 
-// One worked example, nothing more. A live sector portal is not a showroom: every case an
-// officer opens has to be a real citizen waiting for an answer, so the seed leaves a single
-// Assigned complaint that the whole flow can be walked through on, and stops there.
+// Demo complaints are opt-in. A live sector portal is not a showroom: every case an officer
+// opens has to be a real citizen waiting for an answer.
 const caseTemplates = [
   {
     citizen: 0,
@@ -327,6 +361,8 @@ export const seedDemoData = async () => {
   await seedUsers();
   const { categoryByCode, officeByCode } = await seedComplaintReferenceData();
   const staffByOfficeCode = await seedStaffUsers(officeByCode);
-  await seedComplaintCases({ categoryByCode, officeByCode, staffByOfficeCode });
+  if (process.env.DB_SEED_COMPLAINTS === 'true') {
+    await seedComplaintCases({ categoryByCode, officeByCode, staffByOfficeCode });
+  }
   await syncTrackingCounter();
 };

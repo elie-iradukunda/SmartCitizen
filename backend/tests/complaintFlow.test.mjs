@@ -96,6 +96,46 @@ test('a registered citizen can log in, and the password is never stored in the c
   assert.ok((await User.findByPk(ctx.citizen.id)).password.startsWith('$2'));
 });
 
+test('password reset tokens are shown only in local demo mode', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousSmtpHost = process.env.SMTP_HOST;
+  const previousSmtpUser = process.env.SMTP_USER;
+  const previousSmtpPass = process.env.SMTP_PASS;
+
+  try {
+    delete process.env.NODE_ENV;
+    delete process.env.SMTP_HOST;
+    delete process.env.SMTP_USER;
+    delete process.env.SMTP_PASS;
+
+    const local = await authService.forgotPassword('jean@t.rw');
+    assert.ok(local.resetLink, 'local demo mode shows the one-use reset link');
+    assert.ok(local.token, 'local demo mode shows the token because no mail server exists');
+
+    await authService.resetPassword({ email: 'jean@t.rw', token: local.token, password: 'secret456' });
+    await authService.login('jean@t.rw', 'secret456');
+    await rejects(
+      authService.resetPassword({ email: 'jean@t.rw', token: local.token, password: 'secret789' }),
+      /invalid or has expired/
+    );
+
+    process.env.NODE_ENV = 'production';
+    const production = await authService.forgotPassword('jean@t.rw');
+    assert.equal(production.resetLink, undefined);
+    assert.equal(production.token, undefined);
+    assert.equal(production.expiresInMinutes, 30);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousSmtpHost === undefined) delete process.env.SMTP_HOST;
+    else process.env.SMTP_HOST = previousSmtpHost;
+    if (previousSmtpUser === undefined) delete process.env.SMTP_USER;
+    else process.env.SMTP_USER = previousSmtpUser;
+    if (previousSmtpPass === undefined) delete process.env.SMTP_PASS;
+    else process.env.SMTP_PASS = previousSmtpPass;
+  }
+});
+
 test('the admin creates accounts, sets roles, and gives every leader a department', async () => {
   await rejects(
     adminService.createUser({ fullName: 'No Office', email: 'no@t.rw', password: 'secret123', role: 'staff' }),
@@ -116,8 +156,12 @@ test('the admin creates accounts, sets roles, and gives every leader a departmen
   const healthStaff = await adminService.createUser({
     fullName: 'Dr. Keza', email: 'dr@t.rw', password: 'secret123', role: 'staff', officeId: ctx.health.id
   });
+  const sectorStaff = await adminService.createUser({
+    fullName: 'Exec. Mugabo', email: 'exec@t.rw', password: 'secret123', role: 'staff', officeId: ctx.sectorExec.id
+  });
   assert.equal(roadsStaff.office.name, 'Infrastructure Office');
   assert.equal(healthStaff.office.name, 'Health Office');
+  assert.equal(sectorStaff.office.name, 'Sector Executive Office');
 
   const moved = await adminService.updateUser(healthStaff.id, { officeId: ctx.roads.id });
   assert.equal(moved.office.name, 'Infrastructure Office');
@@ -127,6 +171,7 @@ test('the admin creates accounts, sets roles, and gives every leader a departmen
 
   ctx.roadsStaff = await User.findByPk(roadsStaff.id);
   ctx.healthStaff = await User.findByPk(healthStaff.id);
+  ctx.sectorStaff = await User.findByPk(sectorStaff.id);
 });
 
 test('a complaint can be sent as text, as voice, as both, or as an uploaded document', async () => {
@@ -219,6 +264,20 @@ test('the chat opens on the leader\'s first reply and then runs both ways', asyn
   assert.equal((await complaintService.find(tn, ctx.citizen)).unreadMessages, 0, 'opening the thread clears the badge');
 });
 
+test('a leader can send the first feedback message without changing the case status', async () => {
+  const tn = ctx.healthCase.trackingNumber;
+  const live = await complaintService.sendMessage(tn, { body: 'Twakiriye ikibazo cyawe, turagikurikirana.' }, ctx.healthStaff);
+  const row = await Complaint.findOne({ where: { trackingNumber: tn } });
+
+  assert.equal(live.chatOpen, true);
+  assert.equal(live.status, 'Assigned');
+  assert.equal(live.messages.length, 1);
+  assert.equal(live.messages[0].senderRole, 'staff');
+  assert.equal(await ComplaintNotification.count({
+    where: { userId: ctx.citizen.id, complaintId: row.id, title: 'New message on your complaint' }
+  }), 1);
+});
+
 test('the chat is private to the citizen and the department holding the case', async () => {
   const tn = ctx.typed.trackingNumber;
 
@@ -282,7 +341,23 @@ test('a citizen can ask the senior leader for help once the case has earned it',
   const appealed = await complaintService.requestEscalation(tn, { reason: 'Nta gisubizo nabonye.' }, ctx.citizen);
   assert.equal(appealed.status, 'Escalated');
   assert.equal(appealed.assignedOffice, 'Sector Executive Office');
+  assert.equal(appealed.escalationSourceOffice, 'Infrastructure Office');
   assert.equal(await ComplaintNotification.count({ where: { userId: ctx.admin.id, title: 'Citizen requested senior review' } }), 1);
+
+  const sectorAssigned = await complaintService.list({}, ctx.sectorStaff);
+  assert.ok(sectorAssigned.some((complaint) => complaint.trackingNumber === tn), 'the escalation office staff receives the case');
+
+  let live = await complaintService.sendMessage(tn, { body: 'Sector Executive Office irakurikirana iyi dosiye.' }, ctx.sectorStaff);
+  assert.equal(live.chatOpen, true);
+  assert.equal(live.messages.at(-1).senderRole, 'staff');
+
+  live = await complaintService.sendMessage(tn, { body: 'Tuzaha admin amakuru yose.' }, ctx.roadsStaff);
+  assert.equal(live.messages.at(-1).senderRole, 'staff');
+  await rejects(complaintService.update(tn, { status: 'Resolved', responseText: 'done' }, ctx.roadsStaff), /their department/);
+  await rejects(complaintService.sendMessage(tn, { body: 'health here' }, ctx.healthStaff), /private/);
+
+  const roadsAssigned = await complaintService.list({}, ctx.roadsStaff);
+  assert.ok(roadsAssigned.some((complaint) => complaint.trackingNumber === tn), 'the original department keeps the escalated case in Assigned to Me');
 
   await rejects(complaintService.requestEscalation(tn, {}, ctx.citizen), /already/);
 });
@@ -317,6 +392,69 @@ test('the admin can report on the whole sector, filtered to a period', async () 
   const { reportExportService } = await import('../src/services/reportExportService.js');
   assert.ok(reportExportService.file('csv', report, ctx.admin).body.length > 0);
   assert.ok(reportExportService.file('html', report, ctx.admin).body.length > 0);
+});
+
+test('staff escalation moves the case to the sector executive while keeping the source office attached', async () => {
+  const complaint = await complaintService.create({ type: ctx.infraCat.id, description: 'Uyu muhanda urasenyutse cyane.' }, ctx.citizen, {});
+
+  const escalated = await complaintService.escalate(
+    complaint.trackingNumber,
+    { reason: 'Requires senior budget approval.' },
+    ctx.roadsStaff
+  );
+
+  assert.equal(escalated.status, 'Escalated');
+  assert.equal(escalated.assignedOffice, 'Sector Executive Office');
+  assert.equal(escalated.escalationSourceOffice, 'Infrastructure Office');
+  assert.equal(escalated.priority, 'Critical');
+
+  let live = await complaintService.sendMessage(complaint.trackingNumber, { body: 'The escalation office has received this case.' }, ctx.sectorStaff);
+  assert.equal(live.messages.at(-1).senderRole, 'staff');
+
+  live = await complaintService.update(
+    complaint.trackingNumber,
+    { status: 'Resolved', responseText: 'The escalation office completed the senior review.' },
+    ctx.sectorStaff
+  );
+  assert.equal(live.status, 'Resolved');
+
+  const sourceOfficeCases = await complaintService.list({}, ctx.roadsStaff);
+  assert.ok(
+    sourceOfficeCases.some((item) => item.trackingNumber === complaint.trackingNumber),
+    'the source office keeps escalated cases visible for handover and chat'
+  );
+});
+
+test('the SLA check automatically escalates overdue open complaints', async () => {
+  const complaint = await complaintService.create({ type: ctx.healthCat.id, description: 'Ikibazo cyivuriro ntikirakemuka.' }, ctx.citizen, {});
+  await Complaint.update({ dueDate: '2020-01-01' }, { where: { trackingNumber: complaint.trackingNumber } });
+
+  const result = await complaintService.runSlaCheck(ctx.admin);
+  assert.ok(result.trackingNumbers.includes(complaint.trackingNumber));
+
+  const escalated = await complaintService.find(complaint.trackingNumber, ctx.admin);
+  assert.equal(escalated.status, 'Escalated');
+  assert.equal(escalated.assignedOffice, 'Sector Executive Office');
+  assert.equal(escalated.escalationSourceOffice, 'Health Office');
+});
+
+test('anonymous reports can be tracked without exposing a citizen identity', async () => {
+  const complaint = await complaintService.create(
+    { description: 'Natanze amakuru ntashaka ko amazina yanjye agaragara.', evidenceLink: 'https://example.com/evidence' },
+    null,
+    {}
+  );
+
+  assert.equal(complaint.isAnonymous, true);
+  assert.equal(complaint.citizenId, null);
+  assert.equal(complaint.citizenName, 'Anonymous');
+  assert.equal(await ComplaintNotification.count({ where: { complaintId: complaint.dbId, title: 'Complaint submitted' } }), 0);
+
+  const tracked = await complaintService.publicTrack(complaint.trackingNumber);
+  assert.equal(tracked.trackingNumber, complaint.trackingNumber);
+  assert.equal(tracked.status, 'Assigned');
+  assert.ok(!Object.hasOwn(tracked, 'citizenName'));
+  assert.ok(!Object.hasOwn(tracked, 'description'));
 });
 
 test('every action lands in the audit log', async () => {

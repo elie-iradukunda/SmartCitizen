@@ -54,6 +54,9 @@ export const defineComplaint = (sequelize) => sequelize.define('Complaint', {
   },
   assignedTo: DataTypes.STRING(160),
   escalatedTo: DataTypes.STRING(180),
+  // The department that owned the case before escalation. It stays attached so the admin
+  // can keep that leader in the feedback thread after the case moves upstairs.
+  escalationSourceOfficeId: DataTypes.INTEGER,
   channel: { type: DataTypes.STRING(80), defaultValue: 'Web Portal' },
   submissionMode: { type: DataTypes.STRING(80), defaultValue: 'Typed form' },
   evidenceType: DataTypes.STRING(40),
